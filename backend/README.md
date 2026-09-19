@@ -1,6 +1,6 @@
 # Backend
 
-FastAPI service for the University AI Lost & Found platform. Phase 3 adds the SQLite data model foundation while keeping feature workflows for later phases.
+FastAPI service for the University AI Lost & Found platform. Phase 4 adds authenticated lost-item reporting and management on the Phase 3 SQLite foundation.
 
 ## Local setup
 
@@ -22,3 +22,5 @@ Run backend tests with:
 ```powershell
 python -m pytest
 ```
+
+Lost-item endpoints are available under `/api/lost-items` and are scoped to the verified Firebase user. Phase 4 stores an optional image reference only; binary image storage belongs to Phase 5.

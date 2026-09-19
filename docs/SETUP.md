@@ -28,6 +28,8 @@ The health endpoint is `http://127.0.0.1:8000/health`.
 
 The protected identity endpoint is `http://127.0.0.1:8000/api/auth/me` and requires a Firebase ID token in the `Authorization: Bearer` header.
 
+Authenticated lost-item reporting uses `/api/lost-items`. The Phase 4 form stores an optional image reference only; binary image storage is deferred to Phase 5.
+
 For local browser requests, `BACKEND_CORS_ORIGINS` allows the two default Vite origins. Set it explicitly when using another frontend origin.
 
 ## Environment and secrets
