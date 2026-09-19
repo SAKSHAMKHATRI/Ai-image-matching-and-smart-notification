@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 
 from app.auth.firebase import AuthenticatedUser, get_current_user
 from app.database import db, repositories
@@ -7,6 +7,7 @@ from app.database.lost_item_schemas import (
     LostItemResponse,
     LostItemUpdate,
 )
+from app.services.storage_service import store_image, validate_and_read_image
 
 router = APIRouter(prefix="/api/lost-items", tags=["lost-items"])
 
@@ -104,3 +105,33 @@ def delete_my_lost_item(
 ) -> None:
     if not repositories.delete_lost_item_for_user(current_user_id(current_user), item_id):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Lost item not found.")
+
+
+@router.post("/{item_id}/image", response_model=LostItemResponse)
+async def upload_lost_item_image(
+    item_id: int,
+    image: UploadFile = File(...),
+    current_user: AuthenticatedUser = Depends(get_current_user),
+) -> dict[str, object]:
+    user_id = current_user_id(current_user)
+    item = repositories.get_lost_item_for_user(user_id, item_id)
+    if item is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Lost item not found.")
+
+    contents, content_type = await validate_and_read_image(image)
+    try:
+        stored_image = store_image(contents, content_type, current_user.uid, item_id)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Image storage is temporarily unavailable.",
+        ) from exc
+
+    updated_item = repositories.update_lost_item_for_user(
+        user_id,
+        item_id,
+        {"image_reference": stored_image.path},
+    )
+    if updated_item is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Lost item not found.")
+    return serialize_lost_item(updated_item)

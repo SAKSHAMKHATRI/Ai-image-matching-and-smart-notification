@@ -3,7 +3,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { LostItemForm } from "./LostItemForm";
 import { useAuth } from "../auth/AuthContext";
-import { deleteLostItem, getMyLostItems, saveLostItem } from "../services/api";
+import {
+  deleteLostItem,
+  getMyLostItems,
+  saveLostItem,
+  uploadLostItemImage,
+} from "../services/api";
 
 vi.mock("../auth/AuthContext", () => ({
   useAuth: vi.fn(),
@@ -13,11 +18,13 @@ vi.mock("../services/api", () => ({
   deleteLostItem: vi.fn(),
   getMyLostItems: vi.fn(),
   saveLostItem: vi.fn(),
+  uploadLostItemImage: vi.fn(),
 }));
 
 const mockedUseAuth = vi.mocked(useAuth);
 const mockedGetMyLostItems = vi.mocked(getMyLostItems);
 const mockedSaveLostItem = vi.mocked(saveLostItem);
+const mockedUploadLostItemImage = vi.mocked(uploadLostItemImage);
 const mockedUser = { getIdToken: vi.fn().mockResolvedValue("verified-token") };
 
 const report = {
@@ -65,6 +72,7 @@ describe("LostItemForm", () => {
   it("creates a new report through the authenticated API", async () => {
     mockedGetMyLostItems.mockResolvedValue([]);
     mockedSaveLostItem.mockResolvedValue(report);
+    mockedUploadLostItemImage.mockResolvedValue(report);
 
     render(<LostItemForm />);
 
@@ -79,5 +87,29 @@ describe("LostItemForm", () => {
     await waitFor(() => expect(mockedSaveLostItem).toHaveBeenCalled());
     expect(mockedSaveLostItem.mock.calls[0]?.[0]).toBe("verified-token");
     expect(mockedSaveLostItem.mock.calls[0]?.[2]).toBeUndefined();
+  });
+
+  it("uploads an accepted image after creating a report", async () => {
+    mockedGetMyLostItems.mockResolvedValue([]);
+    mockedSaveLostItem.mockResolvedValue(report);
+    mockedUploadLostItemImage.mockResolvedValue(report);
+
+    render(<LostItemForm />);
+    await screen.findByRole("heading", { name: "Report a lost item" });
+    fireEvent.change(screen.getByLabelText("Item name"), { target: { value: "Wallet" } });
+    fireEvent.change(screen.getByLabelText("Category"), { target: { value: "Accessories" } });
+    fireEvent.change(screen.getByLabelText("Lost date"), { target: { value: "2026-09-18" } });
+    fireEvent.change(screen.getByLabelText("Approximate location"), { target: { value: "Student center" } });
+    fireEvent.change(screen.getByLabelText("Description"), { target: { value: "Black leather wallet with a small tear." } });
+    const image = new File(["image"], "wallet.png", { type: "image/png" });
+    fireEvent.change(screen.getByLabelText("Optional image"), {
+      target: { files: [image] },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Create report" }));
+
+    await waitFor(() => expect(mockedUploadLostItemImage).toHaveBeenCalled());
+    expect(mockedUploadLostItemImage.mock.calls[0]?.[0]).toBe("verified-token");
+    expect(mockedUploadLostItemImage.mock.calls[0]?.[1]).toBe(report.id);
+    expect(mockedUploadLostItemImage.mock.calls[0]?.[2]).toBe(image);
   });
 });

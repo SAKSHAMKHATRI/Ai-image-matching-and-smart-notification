@@ -4,7 +4,7 @@ from typing import Any
 import firebase_admin
 from fastapi import HTTPException, Security, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from firebase_admin import auth, credentials
+from firebase_admin import auth, credentials, storage
 from pydantic import BaseModel, ConfigDict
 
 from app.config import FirebaseConfigError, get_firebase_options
@@ -39,6 +39,18 @@ def get_firebase_app() -> firebase_admin.App:
         raise
     except Exception as exc:
         raise FirebaseConfigError("Firebase Admin initialization failed.") from exc
+
+
+@lru_cache
+def get_storage_bucket():
+    from app.config import get_storage_bucket_name
+
+    try:
+        return storage.bucket(get_storage_bucket_name(), app=get_firebase_app())
+    except FirebaseConfigError:
+        raise
+    except Exception as exc:
+        raise FirebaseConfigError("Firebase Storage initialization failed.") from exc
 
 
 def verify_firebase_token(token: str) -> dict[str, Any]:

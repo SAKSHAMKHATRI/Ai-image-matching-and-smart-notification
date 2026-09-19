@@ -5,6 +5,7 @@ import {
   deleteLostItem,
   getMyLostItems,
   saveLostItem,
+  uploadLostItemImage,
   type LostItem,
   type LostItemInput,
 } from "../services/api";
@@ -26,6 +27,7 @@ export function LostItemForm() {
   const [reports, setReports] = useState<LostItem[]>([]);
   const [item, setItem] = useState<LostItemInput>(emptyItem);
   const [editingId, setEditingId] = useState<number | undefined>();
+  const [selectedImage, setSelectedImage] = useState<File | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -77,10 +79,14 @@ export function LostItemForm() {
     setSuccess(null);
     try {
       const token = await user!.getIdToken();
-      await saveLostItem(token, item, editingId);
+      const savedItem = await saveLostItem(token, item, editingId);
+      if (selectedImage) {
+        await uploadLostItemImage(token, savedItem.id, selectedImage);
+      }
       await loadReports();
       setItem(emptyItem);
       setEditingId(undefined);
+      setSelectedImage(null);
       setSuccess(editingId ? "Lost report updated." : "Lost report created.");
     } catch {
       setError("Check the report details and try again.");
@@ -110,7 +116,7 @@ export function LostItemForm() {
       <p className="eyebrow">Lost items</p>
       <h2 id="lost-items-title">Report a lost item</h2>
       <p className="profile-note">
-        Image storage is intentionally deferred to Phase 5. This phase stores an optional reference only.
+        JPEG, PNG, and WebP images up to 5 MB are stored in protected Firebase Storage.
       </p>
       <form className="profile-form" onSubmit={handleSubmit}>
         <label>Item name<input required maxLength={120} onChange={(event) => updateField("item_name", event.target.value)} value={item.item_name} /></label>
@@ -121,7 +127,7 @@ export function LostItemForm() {
         <label>Approximate location<input required maxLength={160} onChange={(event) => updateField("approximate_location", event.target.value)} value={item.approximate_location} /></label>
         <label>Description<textarea required maxLength={2000} minLength={10} onChange={(event) => updateField("description", event.target.value)} value={item.description} /></label>
         <label>Distinctive features<textarea maxLength={1000} onChange={(event) => updateField("distinctive_features", event.target.value)} value={item.distinctive_features ?? ""} /></label>
-        <label>Optional image reference<input maxLength={500} onChange={(event) => updateField("image_reference", event.target.value)} value={item.image_reference ?? ""} /></label>
+        <label>Optional image<input accept="image/jpeg,image/png,image/webp" onChange={(event) => setSelectedImage(event.target.files?.[0] ?? null)} type="file" /></label>
         {error && <p className="error-message" role="alert">{error}</p>}
         {success && <p className="success-message" role="status">{success}</p>}
         <div className="button-row">

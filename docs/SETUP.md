@@ -28,7 +28,9 @@ The health endpoint is `http://127.0.0.1:8000/health`.
 
 The protected identity endpoint is `http://127.0.0.1:8000/api/auth/me` and requires a Firebase ID token in the `Authorization: Bearer` header.
 
-Authenticated lost-item reporting uses `/api/lost-items`. The Phase 4 form stores an optional image reference only; binary image storage is deferred to Phase 5.
+Authenticated lost-item reporting uses `/api/lost-items`. Phase 5 uploads JPEG, PNG, and WebP files up to 5 MB through the backend to Firebase Storage; SQLite stores only the generated storage path.
+
+Deploy `storage.rules` to Firebase Storage so browser clients cannot access the bucket directly. The backend Firebase Admin SDK bypasses client rules and remains the only storage access path.
 
 For local browser requests, `BACKEND_CORS_ORIGINS` allows the two default Vite origins. Set it explicitly when using another frontend origin.
 
