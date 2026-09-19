@@ -139,3 +139,21 @@ export async function deleteLostItem(idToken: string, itemId: number): Promise<v
     throw new Error("Lost report could not be deleted.");
   }
 }
+
+export async function uploadLostItemImage(
+  idToken: string,
+  itemId: number,
+  image: File,
+): Promise<LostItem> {
+  const formData = new FormData();
+  formData.append("image", image);
+  const response = await fetch(`${apiBaseUrl}/api/lost-items/${itemId}/image`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${idToken}` },
+    body: formData,
+  });
+  if (!response.ok) {
+    throw new Error("Image could not be stored.");
+  }
+  return response.json() as Promise<LostItem>;
+}

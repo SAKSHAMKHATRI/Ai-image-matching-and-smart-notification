@@ -56,3 +56,10 @@ def get_firebase_options() -> dict[str, str]:
         "clientEmail": client_email,
         "privateKey": private_key.replace("\\n", "\n"),
     }
+
+
+def get_storage_bucket_name() -> str:
+    bucket_name = os.getenv("FIREBASE_STORAGE_BUCKET")
+    if not bucket_name or bucket_name.startswith("replace-with-"):
+        raise FirebaseConfigError("Firebase Storage bucket is not configured.")
+    return bucket_name
