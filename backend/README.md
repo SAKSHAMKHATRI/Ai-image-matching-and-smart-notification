@@ -1,6 +1,6 @@
 # Backend
 
-FastAPI service for the University AI Lost & Found platform.
+FastAPI service for the University AI Lost & Found platform. Phase 2 adds private student profile management.
 
 ## Local setup
 

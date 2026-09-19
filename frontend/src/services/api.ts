@@ -6,6 +6,26 @@ export type AuthenticatedIdentity = {
   email_verified: boolean;
 };
 
+export type StudentProfile = {
+  id: number;
+  firebase_uid: string;
+  full_name: string;
+  roll_number: string;
+  class_section: string;
+  course_program: string;
+  semester: number;
+  phone_number: string;
+  university_email: string;
+  campus: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type StudentProfileInput = Omit<
+  StudentProfile,
+  "id" | "firebase_uid" | "created_at" | "updated_at"
+>;
+
 export async function getCurrentIdentity(
   idToken: string,
 ): Promise<AuthenticatedIdentity> {
@@ -20,4 +40,42 @@ export async function getCurrentIdentity(
   }
 
   return response.json() as Promise<AuthenticatedIdentity>;
+}
+
+async function profileRequest(
+  idToken: string,
+  method: "GET" | "POST" | "PATCH",
+  body?: StudentProfileInput,
+): Promise<Response> {
+  return fetch(`${apiBaseUrl}/api/profile`, {
+    method,
+    headers: {
+      Authorization: `Bearer ${idToken}`,
+      ...(body ? { "Content-Type": "application/json" } : {}),
+    },
+    ...(body ? { body: JSON.stringify(body) } : {}),
+  });
+}
+
+export async function getMyProfile(idToken: string): Promise<StudentProfile | null> {
+  const response = await profileRequest(idToken, "GET");
+  if (response.status === 404) {
+    return null;
+  }
+  if (!response.ok) {
+    throw new Error("The profile could not be loaded.");
+  }
+  return response.json() as Promise<StudentProfile>;
+}
+
+export async function saveMyProfile(
+  idToken: string,
+  profile: StudentProfileInput,
+  exists: boolean,
+): Promise<StudentProfile> {
+  const response = await profileRequest(idToken, exists ? "PATCH" : "POST", profile);
+  if (!response.ok) {
+    throw new Error("The profile could not be saved.");
+  }
+  return response.json() as Promise<StudentProfile>;
 }

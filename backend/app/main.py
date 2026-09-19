@@ -1,8 +1,10 @@
 from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.api.profile import router as profile_router
 from app.auth.firebase import AuthenticatedUser, get_current_user
 from app.config import get_cors_origins
+from app.database.db import initialize_database
 
 app = FastAPI(
     title="University AI Lost & Found API",
@@ -14,9 +16,11 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=get_cors_origins(),
     allow_credentials=False,
-    allow_methods=["GET"],
+    allow_methods=["GET", "POST", "PATCH"],
     allow_headers=["Authorization", "Content-Type"],
 )
+initialize_database()
+app.include_router(profile_router)
 
 
 @app.get("/health")

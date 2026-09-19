@@ -2,6 +2,7 @@ import { useState } from "react";
 import type { FormEvent } from "react";
 
 import { useAuth } from "./auth/AuthContext";
+import { ProfileForm } from "./components/ProfileForm";
 import { getCurrentIdentity, type AuthenticatedIdentity } from "./services/api";
 
 type FirebaseAuthError = {
@@ -205,6 +206,7 @@ function ProtectedPage() {
         </div>
       )}
       {backendError && <p className="error-message" role="alert">{backendError}</p>}
+        <ProfileForm />
       <div className="button-row">
         <button className="primary-button" onClick={checkBackendIdentity} type="button">
           Check protected API
