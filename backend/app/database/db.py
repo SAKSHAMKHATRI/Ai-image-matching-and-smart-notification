@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any
 
 DEFAULT_DATABASE_PATH = Path(__file__).resolve().parents[2] / "data" / "profiles.db"
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 
 def get_database_path() -> Path:
@@ -78,6 +78,11 @@ def _create_schema(connection: sqlite3.Connection) -> None:
             found_at TEXT,
             location TEXT,
             image_reference TEXT,
+            analysis_status TEXT NOT NULL DEFAULT 'NOT_REQUESTED'
+                CHECK (analysis_status IN ('NOT_REQUESTED', 'QUEUED', 'UNAVAILABLE', 'FAILED')),
+            analysis_error TEXT,
+            analysis_requested_at TEXT,
+            analysis_completed_at TEXT,
             created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
             updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE RESTRICT
@@ -167,6 +172,20 @@ def initialize_database() -> None:
                         f"ALTER TABLE lost_items ADD COLUMN {column} {definition}"
                     )
         if current_version < SCHEMA_VERSION:
+            columns = {
+                row[1]
+                for row in connection.execute("PRAGMA table_info(found_items)")
+            }
+            for column, definition in (
+                ("analysis_status", "TEXT NOT NULL DEFAULT 'NOT_REQUESTED'"),
+                ("analysis_error", "TEXT"),
+                ("analysis_requested_at", "TEXT"),
+                ("analysis_completed_at", "TEXT"),
+            ):
+                if column not in columns:
+                    connection.execute(
+                        f"ALTER TABLE found_items ADD COLUMN {column} {definition}"
+                    )
             connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
 

@@ -63,10 +63,13 @@ def store_image(
     content_type: str,
     firebase_uid: str,
     item_id: int,
+    collection: str = "lost-items",
 ) -> StoredImage:
     extension = ALLOWED_IMAGE_TYPES[content_type]
     owner_key = sha256(firebase_uid.encode("utf-8")).hexdigest()
-    path = f"lost-items/{owner_key}/{item_id}/{uuid4().hex}{extension}"
+    if collection not in {"lost-items", "found-items"}:
+        raise ValueError("Unsupported image collection.")
+    path = f"{collection}/{owner_key}/{item_id}/{uuid4().hex}{extension}"
     blob = get_storage_bucket().blob(path)
     blob.upload_from_string(contents, content_type=content_type)
     blob.metadata = {"firebase_uid": firebase_uid, "lost_item_id": str(item_id)}

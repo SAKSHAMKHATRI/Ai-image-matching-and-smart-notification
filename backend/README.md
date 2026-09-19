@@ -23,4 +23,4 @@ Run backend tests with:
 python -m pytest
 ```
 
-Lost-item endpoints are available under `/api/lost-items` and are scoped to the verified Firebase user. Phase 5 adds `POST /api/lost-items/{id}/image`; configure `FIREBASE_STORAGE_BUCKET` and Firebase Admin credentials locally before using it.
+Lost-item endpoints are available under `/api/lost-items` and found-item endpoints under `/api/found-items`; both are scoped to the verified Firebase user. Configure `FIREBASE_STORAGE_BUCKET` and Firebase Admin credentials locally before using image uploads. Phase 6 exposes an analysis trigger, but the provider remains intentionally unavailable until Phase 7.

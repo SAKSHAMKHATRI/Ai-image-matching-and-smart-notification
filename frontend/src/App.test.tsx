@@ -17,6 +17,10 @@ vi.mock("./components/LostItemForm", () => ({
   LostItemForm: () => null,
 }));
 
+vi.mock("./components/FoundItemForm", () => ({
+  FoundItemForm: () => null,
+}));
+
 const mockedUseAuth = vi.mocked(useAuth);
 
 describe("authentication UI states", () => {
