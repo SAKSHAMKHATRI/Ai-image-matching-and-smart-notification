@@ -1,6 +1,6 @@
 # Backend
 
-FastAPI service for the University AI Lost & Found platform. Phase 2 adds private student profile management.
+FastAPI service for the University AI Lost & Found platform. Phase 3 adds the SQLite data model foundation while keeping feature workflows for later phases.
 
 ## Local setup
 
