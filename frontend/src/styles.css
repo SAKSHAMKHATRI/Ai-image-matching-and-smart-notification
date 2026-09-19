@@ -158,6 +158,37 @@ button:focus-visible {
   font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
   font-size: 0.75rem;
 }
+.profile-panel {
+  margin-top: 2rem;
+  border-top: 1px solid rgba(31, 42, 36, 0.16);
+  padding-top: 2rem;
+}
+
+.profile-panel h2 {
+  margin: 0;
+  font-size: 1.8rem;
+  font-weight: 500;
+}
+
+.profile-note {
+  color: #53645a;
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  font-size: 0.875rem;
+}
+
+.profile-form {
+  display: grid;
+  gap: 1rem;
+}
+
+.success-message {
+  margin: 0;
+  padding: 0.75rem;
+  color: #28583d;
+  background: #d9eadc;
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  font-size: 0.875rem;
+}
 
 .status {
   display: inline-flex;

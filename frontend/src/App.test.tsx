@@ -9,6 +9,10 @@ vi.mock("./auth/AuthContext", () => ({
   useAuth: vi.fn(),
 }));
 
+vi.mock("./components/ProfileForm", () => ({
+  ProfileForm: () => null,
+}));
+
 const mockedUseAuth = vi.mocked(useAuth);
 
 describe("authentication UI states", () => {
