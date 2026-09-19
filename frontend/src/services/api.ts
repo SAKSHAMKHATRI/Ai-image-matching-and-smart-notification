@@ -26,6 +26,24 @@ export type StudentProfileInput = Omit<
   "id" | "firebase_uid" | "created_at" | "updated_at"
 >;
 
+export type LostItem = {
+  id: number;
+  status: string;
+  item_name: string;
+  category: string;
+  color: string | null;
+  brand: string | null;
+  lost_date: string;
+  approximate_location: string;
+  description: string;
+  distinctive_features: string | null;
+  image_reference: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type LostItemInput = Omit<LostItem, "id" | "status" | "created_at" | "updated_at">;
+
 export async function getCurrentIdentity(
   idToken: string,
 ): Promise<AuthenticatedIdentity> {
@@ -78,4 +96,46 @@ export async function saveMyProfile(
     throw new Error("The profile could not be saved.");
   }
   return response.json() as Promise<StudentProfile>;
+}
+
+export async function getMyLostItems(idToken: string): Promise<LostItem[]> {
+  const response = await fetch(`${apiBaseUrl}/api/lost-items`, {
+    headers: { Authorization: `Bearer ${idToken}` },
+  });
+  if (!response.ok) {
+    throw new Error("Lost reports could not be loaded.");
+  }
+  return response.json() as Promise<LostItem[]>;
+}
+
+export async function saveLostItem(
+  idToken: string,
+  item: LostItemInput,
+  itemId?: number,
+): Promise<LostItem> {
+  const response = await fetch(
+    `${apiBaseUrl}/api/lost-items${itemId ? `/${itemId}` : ""}`,
+    {
+      method: itemId ? "PATCH" : "POST",
+      headers: {
+        Authorization: `Bearer ${idToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(item),
+    },
+  );
+  if (!response.ok) {
+    throw new Error("Lost report could not be saved.");
+  }
+  return response.json() as Promise<LostItem>;
+}
+
+export async function deleteLostItem(idToken: string, itemId: number): Promise<void> {
+  const response = await fetch(`${apiBaseUrl}/api/lost-items/${itemId}`, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${idToken}` },
+  });
+  if (!response.ok) {
+    throw new Error("Lost report could not be deleted.");
+  }
 }

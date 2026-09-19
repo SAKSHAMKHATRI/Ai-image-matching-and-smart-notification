@@ -9,4 +9,6 @@ Phase 2 stores student profiles in SQLite. Each profile is keyed by the verified
 
 Phase 3 adds the foundational `users`, `lost_items`, `found_items`, `matches`, `claims`, and `audit_events` tables. The schema includes foreign keys, status constraints, indexes, repeatable initialization, and transaction-backed repository primitives. Feature workflows remain out of scope until their later phases.
 
+Phase 4 adds owner-scoped lost-item CRUD APIs and a frontend report form. Lost reports store structured metadata and an optional image reference; image binary storage is intentionally deferred to Phase 5.
+
 Lost/found application data, storage, AI, matching, claims, notifications, and administration belong to later phases and are intentionally absent from this foundation.

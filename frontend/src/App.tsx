@@ -2,6 +2,7 @@ import { useState } from "react";
 import type { FormEvent } from "react";
 
 import { useAuth } from "./auth/AuthContext";
+import { LostItemForm } from "./components/LostItemForm";
 import { ProfileForm } from "./components/ProfileForm";
 import { getCurrentIdentity, type AuthenticatedIdentity } from "./services/api";
 
@@ -207,6 +208,7 @@ function ProtectedPage() {
       )}
       {backendError && <p className="error-message" role="alert">{backendError}</p>}
         <ProfileForm />
+        <LostItemForm />
       <div className="button-row">
         <button className="primary-button" onClick={checkBackendIdentity} type="button">
           Check protected API
