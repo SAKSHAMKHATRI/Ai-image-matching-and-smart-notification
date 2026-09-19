@@ -76,6 +76,43 @@ def create_found_item(user_id: int, **fields: Any) -> int:
     return db.insert_record("found_items", {"user_id": user_id, **fields})
 
 
+def list_found_items_for_user(user_id: int) -> list[dict[str, Any]]:
+    with db.get_connection() as connection:
+        rows = connection.execute(
+            "SELECT * FROM found_items WHERE user_id = ? ORDER BY created_at DESC, id DESC",
+            (user_id,),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def get_found_item_for_user(user_id: int, item_id: int) -> dict[str, Any] | None:
+    item = get_found_item(item_id)
+    if item is None or item["user_id"] != user_id:
+        return None
+    return item
+
+
+def update_found_item_for_user(
+    user_id: int,
+    item_id: int,
+    fields: dict[str, Any],
+) -> dict[str, Any] | None:
+    assignments = ", ".join(f"{field} = ?" for field in fields)
+    values = (*fields.values(), item_id, user_id)
+    with db.get_connection() as connection:
+        cursor = connection.execute(
+            f"""
+            UPDATE found_items
+            SET {assignments}, updated_at = CURRENT_TIMESTAMP
+            WHERE id = ? AND user_id = ?
+            """,
+            values,
+        )
+        if cursor.rowcount == 0:
+            return None
+    return get_found_item_for_user(user_id, item_id)
+
+
 def create_match(found_item_id: int, lost_item_id: int, **fields: Any) -> int:
     return db.insert_record(
         "matches",

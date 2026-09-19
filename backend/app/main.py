@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.profile import router as profile_router
 from app.api.lost_items import router as lost_items_router
+from app.api.found_items import router as found_items_router
 from app.auth.firebase import AuthenticatedUser, get_current_user
 from app.config import get_cors_origins
 from app.database.db import initialize_database
@@ -23,6 +24,7 @@ app.add_middleware(
 initialize_database()
 app.include_router(profile_router)
 app.include_router(lost_items_router)
+app.include_router(found_items_router)
 
 
 @app.get("/health")

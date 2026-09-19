@@ -32,6 +32,8 @@ Authenticated lost-item reporting uses `/api/lost-items`. Phase 5 uploads JPEG, 
 
 Deploy `storage.rules` to Firebase Storage so browser clients cannot access the bucket directly. The backend Firebase Admin SDK bypasses client rules and remains the only storage access path.
 
+Found-item reporting uses `/api/found-items`. `POST /api/found-items/{id}/analyze` is a Phase 6 interface only; it returns an AI-unavailable fallback until the Phase 7 provider is implemented. No Foundry environment variables are required for Phase 6.
+
 For local browser requests, `BACKEND_CORS_ORIGINS` allows the two default Vite origins. Set it explicitly when using another frontend origin.
 
 ## Environment and secrets

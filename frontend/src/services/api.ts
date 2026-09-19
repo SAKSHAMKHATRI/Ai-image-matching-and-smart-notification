@@ -44,6 +44,19 @@ export type LostItem = {
 
 export type LostItemInput = Omit<LostItem, "id" | "status" | "created_at" | "updated_at">;
 
+export type FoundItem = {
+  id: number;
+  status: string;
+  found_date: string;
+  found_location: string | null;
+  campus: string | null;
+  image_reference: string | null;
+  analysis_status: string;
+  analysis_error: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
 export async function getCurrentIdentity(
   idToken: string,
 ): Promise<AuthenticatedIdentity> {
@@ -156,4 +169,64 @@ export async function uploadLostItemImage(
     throw new Error("Image could not be stored.");
   }
   return response.json() as Promise<LostItem>;
+}
+
+export async function createFoundItem(
+  idToken: string,
+  foundDate: string,
+  foundLocation: string,
+  campus: string,
+): Promise<FoundItem> {
+  const response = await fetch(`${apiBaseUrl}/api/found-items`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${idToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      found_date: foundDate,
+      found_location: foundLocation || null,
+      campus: campus || null,
+    }),
+  });
+  if (!response.ok) {
+    throw new Error("Found item could not be reported.");
+  }
+  return response.json() as Promise<FoundItem>;
+}
+
+export async function uploadFoundItemImage(
+  idToken: string,
+  itemId: number,
+  image: File,
+): Promise<FoundItem> {
+  const formData = new FormData();
+  formData.append("image", image);
+  const response = await fetch(`${apiBaseUrl}/api/found-items/${itemId}/image`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${idToken}` },
+    body: formData,
+  });
+  if (!response.ok) {
+    throw new Error("Found-item image could not be stored.");
+  }
+  return response.json() as Promise<FoundItem>;
+}
+
+export async function triggerFoundItemAnalysis(
+  idToken: string,
+  itemId: number,
+): Promise<{ found_item: FoundItem; accepted: boolean; message: string }> {
+  const response = await fetch(`${apiBaseUrl}/api/found-items/${itemId}/analyze`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${idToken}` },
+  });
+  if (!response.ok) {
+    throw new Error("Found-item analysis could not be started.");
+  }
+  return response.json() as Promise<{
+    found_item: FoundItem;
+    accepted: boolean;
+    message: string;
+  }>;
 }

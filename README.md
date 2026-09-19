@@ -1,6 +1,6 @@
 # University AI Lost & Found
 
-Phase 5 establishes the repository foundation, Firebase authentication, private student profiles, SQLite data foundations, authenticated lost-item reporting, and secure image storage for the university-only Lost & Found platform.
+Phase 6 establishes the repository foundation, Firebase authentication, private student profiles, SQLite data foundations, lost-item reporting, secure image storage, and found-item reporting for the university-only Lost & Found platform.
 
 ## Repository layout
 
@@ -57,4 +57,4 @@ Copy `.env.example` to `.env` for local configuration. `.env` is ignored by Git.
 
 ## Phase boundary
 
-Phase 0 through Phase 5 are implemented. Found-item workflows, Microsoft Foundry, OCR, embeddings, matching, claims, notifications, and admin workflows belong to later phases and are intentionally not included.
+Phase 0 through Phase 6 are implemented. Microsoft Foundry integration, OCR, embeddings, matching, claims, notifications, and admin workflows belong to later phases and are intentionally not included.
