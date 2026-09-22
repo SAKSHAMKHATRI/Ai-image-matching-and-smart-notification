@@ -4,7 +4,7 @@ from typing import Any
 import firebase_admin
 from fastapi import HTTPException, Security, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from firebase_admin import auth, credentials
+from firebase_admin import auth, credentials, storage
 from pydantic import BaseModel, ConfigDict
 
 from app.config import FirebaseConfigError, get_firebase_options
@@ -32,6 +32,7 @@ def get_firebase_app() -> firebase_admin.App:
                 "project_id": options["projectId"],
                 "client_email": options["clientEmail"],
                 "private_key": options["privateKey"],
+                "token_uri": options["tokenUri"],
             }
         )
         return firebase_admin.initialize_app(service_account)
@@ -41,9 +42,30 @@ def get_firebase_app() -> firebase_admin.App:
         raise FirebaseConfigError("Firebase Admin initialization failed.") from exc
 
 
+@lru_cache
+def get_storage_bucket():
+    from app.config import get_storage_bucket_name
+
+    try:
+        return storage.bucket(get_storage_bucket_name(), app=get_firebase_app())
+    except FirebaseConfigError:
+        raise
+    except Exception as exc:
+        raise FirebaseConfigError("Firebase Storage initialization failed.") from exc
+
+
 def verify_firebase_token(token: str) -> dict[str, Any]:
     try:
-        return auth.verify_id_token(token, app=get_firebase_app())
+        firebase_app = get_firebase_app()
+    except FirebaseConfigError as exc:
+        # Server-side configuration is broken: this is not the caller's fault.
+        # Surface 503 instead of masking it as an authentication failure.
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Authentication service is not configured. Contact the administrator.",
+        ) from exc
+    try:
+        return auth.verify_id_token(token, app=firebase_app)
     except Exception as exc:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -66,6 +88,11 @@ def get_current_user(
         decoded_token = verify_firebase_token(credentials_header.credentials)
     except HTTPException:
         raise
+    except FirebaseConfigError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Authentication service is not configured. Contact the administrator.",
+        ) from exc
     except Exception as exc:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

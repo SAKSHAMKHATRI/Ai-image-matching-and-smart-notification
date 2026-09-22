@@ -2,8 +2,10 @@ import { useState } from "react";
 import type { FormEvent } from "react";
 
 import { useAuth } from "./auth/AuthContext";
+import { LostItemForm } from "./components/LostItemForm";
+import { FoundItemForm } from "./components/FoundItemForm";
 import { ProfileForm } from "./components/ProfileForm";
-import { getCurrentIdentity, type AuthenticatedIdentity } from "./services/api";
+import { Dashboard, type DashboardView } from "./components/Dashboard";
 
 type FirebaseAuthError = {
   code?: string;
@@ -175,46 +177,27 @@ function AuthForm() {
 }
 
 function ProtectedPage() {
-  const { user, logOut } = useAuth();
-  const [identity, setIdentity] = useState<AuthenticatedIdentity | null>(null);
-  const [backendError, setBackendError] = useState<string | null>(null);
+  const { user } = useAuth();
+  const [view, setView] = useState<DashboardView>("dashboard");
 
-  async function checkBackendIdentity() {
-    setBackendError(null);
-    try {
-      const token = await user!.getIdToken();
-      setIdentity(await getCurrentIdentity(token));
-    } catch {
-      setBackendError("The backend could not verify your session.");
-    }
+  if (view === "dashboard") {
+    return <Dashboard userEmail={user?.email ?? undefined} onNavigate={setView} />;
   }
 
   return (
     <section className="welcome-panel" aria-labelledby="protected-title">
-      <p className="eyebrow">Protected account</p>
-      <h1 id="protected-title">You are signed in</h1>
-      <p className="intro">Firebase Authentication is active for this session.</p>
-      <div className="identity-panel">
-        <strong>Firebase account</strong>
-        <span>{user?.email || "No email returned"}</span>
-      </div>
-      {identity && (
-        <div className="identity-panel" role="status">
-          <strong>Verified backend identity</strong>
-          <span>UID: {identity.uid}</span>
-          <span>Email verified: {identity.email_verified ? "yes" : "no"}</span>
-        </div>
-      )}
-      {backendError && <p className="error-message" role="alert">{backendError}</p>}
-        <ProfileForm />
-      <div className="button-row">
-        <button className="primary-button" onClick={checkBackendIdentity} type="button">
-          Check protected API
-        </button>
-        <button className="secondary-button" onClick={() => void logOut()} type="button">
-          Log out
+      <div className="button-row page-nav">
+        <button
+          className="secondary-button"
+          onClick={() => setView("dashboard")}
+          type="button"
+        >
+          ← Back to dashboard
         </button>
       </div>
+      {view === "profile" && <ProfileForm />}
+      {view === "lost" && <LostItemForm />}
+      {view === "found" && <FoundItemForm />}
     </section>
   );
 }
