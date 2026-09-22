@@ -201,6 +201,10 @@ class TestAdminApi:
         client = TestClient(app)
 
         try:
+            res_verify = client.get("/api/admin/verify")
+            assert res_verify.status_code == 403
+            assert "Administrator access required" in res_verify.json()["detail"]
+
             res_overview = client.get("/api/admin/overview")
             assert res_overview.status_code == 403
             assert "Administrator access required" in res_overview.json()["detail"]
@@ -213,7 +217,7 @@ class TestAdminApi:
         finally:
             app.dependency_overrides.clear()
 
-    def test_admin_can_access_overview_and_moderate(self, admin_test_db):
+    def test_admin_can_verify_and_access_overview_and_moderate(self, admin_test_db):
         admin_uid = admin_test_db["admin_uid"]
         app.dependency_overrides[get_current_user] = lambda: AuthenticatedUser(
             uid=admin_uid,
@@ -222,6 +226,17 @@ class TestAdminApi:
         client = TestClient(app)
 
         try:
+            # 0. Verify status
+            res_verify = client.get("/api/admin/verify")
+            assert res_verify.status_code == 200
+            assert res_verify.json() == {
+                "status": "ok",
+                "uid": admin_uid,
+                "email": "admin@university.edu",
+                "role": "ADMIN",
+                "is_admin": True,
+            }
+
             # 1. Overview
             res_overview = client.get("/api/admin/overview")
             assert res_overview.status_code == 200
@@ -270,3 +285,141 @@ class TestAdminApi:
             assert len(res_audit.json()) > 0
         finally:
             app.dependency_overrides.clear()
+
+
+def test_manage_admin_role_lifecycle(admin_test_db):
+    """Verify that granting and revoking ADMIN role via manage_admin updates DB correctly."""
+    from manage_admin import resolve_firebase_uid, set_user_role
+
+    student_uid = "student1-uid-111"
+    resolved = resolve_firebase_uid("alice@university.edu")
+    assert resolved == student_uid
+
+    # Grant admin
+    set_user_role("alice@university.edu", "ADMIN")
+    user_rec = db.get_user_by_firebase_uid(student_uid)
+    assert user_rec is not None
+    assert user_rec["role"] == "ADMIN"
+
+    # Profile response now reflects ADMIN role
+    profile = db.get_profile(student_uid)
+    assert profile is not None
+    assert profile["role"] == "ADMIN"
+
+    # Revoke admin
+    set_user_role(student_uid, "STUDENT")
+    user_rec = db.get_user_by_firebase_uid(student_uid)
+    assert user_rec is not None
+    assert user_rec["role"] == "STUDENT"
+    profile = db.get_profile(student_uid)
+    assert profile["role"] == "STUDENT"
+
+
+def test_database_initialization_does_not_seed_mock_users(tmp_path, monkeypatch):
+    """Ensure database initialization creates schema with 0 seeded/mock users."""
+    fresh_db = tmp_path / "fresh_zero_seed.db"
+    monkeypatch.setattr(db, "get_database_path", lambda: fresh_db)
+
+    db.initialize_database()
+
+    with db.get_connection() as conn:
+        user_count = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
+        profile_count = conn.execute("SELECT COUNT(*) FROM student_profiles").fetchone()[0]
+        lost_count = conn.execute("SELECT COUNT(*) FROM lost_items").fetchone()[0]
+        found_count = conn.execute("SELECT COUNT(*) FROM found_items").fetchone()[0]
+
+    assert user_count == 0
+    assert profile_count == 0
+    assert lost_count == 0
+    assert found_count == 0
+
+
+def test_bootstrap_admin_does_not_create_synthetic_profile(tmp_path, monkeypatch):
+    """Verify manage_admin bootstrap assigns role=ADMIN without creating a fake student profile."""
+    from manage_admin import bootstrap_admin
+
+    fresh_db = tmp_path / "bootstrap_test.db"
+    monkeypatch.setattr(db, "get_database_path", lambda: fresh_db)
+    db.initialize_database()
+
+    bootstrap_admin(email="admin@chitkara.edu.in", password="admin1234")
+
+    with db.get_connection() as conn:
+        users = conn.execute("SELECT * FROM users").fetchall()
+        profiles = conn.execute("SELECT * FROM student_profiles").fetchall()
+
+    assert len(users) == 1
+    assert users[0]["role"] == "ADMIN"
+    # No fake student profile is seeded into student_profiles table
+    assert len(profiles) == 0
+
+
+def test_one_firebase_uid_maps_to_single_sqlite_user_idempotently(tmp_path, monkeypatch):
+    """Ensure each Firebase UID maps to exactly one SQLite user row and ensure_user is idempotent."""
+    database_path = tmp_path / "idempotent_user.db"
+    monkeypatch.setattr(db, "get_database_path", lambda: database_path)
+    db.initialize_database()
+
+    uid = "firebase-uid-real-123"
+    id1 = db.ensure_user(uid, role="STUDENT", email="student@university.edu", display_name="Test Student")
+    id2 = db.ensure_user(uid, role="STUDENT", email="student@university.edu", display_name="Test Student Updated")
+
+    assert id1 == id2
+
+    with db.get_connection() as conn:
+        user_rows = conn.execute("SELECT * FROM users WHERE firebase_uid = ?", (uid,)).fetchall()
+        assert len(user_rows) == 1
+        assert user_rows[0]["email"] == "student@university.edu"
+        assert user_rows[0]["display_name"] == "Test Student Updated"
+        assert user_rows[0]["role"] == "STUDENT"
+
+
+def test_admin_dashboard_preserves_report_ownership_and_real_data(tmp_path, monkeypatch):
+    """Verify admin overview and user listings accurately link owned reports and display real emails."""
+    database_path = tmp_path / "ownership_test.db"
+    monkeypatch.setattr(db, "get_database_path", lambda: database_path)
+    db.initialize_database()
+
+    admin_uid = "p8e0wyuFNFOAdKp10yZL4Fylng73"
+    student_uid = "student-uid-reconciled"
+
+    admin_id = db.ensure_user(admin_uid, role="ADMIN", email="admin@chitkara.edu.in", display_name="Chitkara Admin")
+    student_id = db.ensure_user(student_uid, role="STUDENT", email="real.student@chitkara.edu.in", display_name="Real Student")
+
+    # Student creates a lost report
+    lost_id = repositories.create_lost_item(
+        student_id,
+        item_name="Blue Backpack",
+        category="Bags & Backpacks",
+        campus="Main Campus",
+        lost_at="2026-09-15",
+    )
+
+    # Student creates a found report
+    found_id = repositories.create_found_item(
+        student_id,
+        item_name="Found Keys",
+        category="Keys",
+        campus="Main Campus",
+        found_at="2026-09-16",
+    )
+
+    overview = get_admin_overview_stats()
+    assert overview["total_users"] == 2
+    assert overview["total_lost_items"] == 1
+    assert overview["total_found_items"] == 1
+
+    users = get_all_users_admin()
+    assert len(users) == 2
+
+    admin_row = next(u for u in users if u["firebase_uid"] == admin_uid)
+    assert admin_row["role"] == "ADMIN"
+    assert admin_row["email"] == "admin@chitkara.edu.in"
+    assert admin_row["full_name"] == "Chitkara Admin"
+
+    student_row = next(u for u in users if u["firebase_uid"] == student_uid)
+    assert student_row["role"] == "STUDENT"
+    assert student_row["email"] == "real.student@chitkara.edu.in"
+    assert student_row["full_name"] == "Real Student"
+    assert student_row["lost_count"] == 1
+    assert student_row["found_count"] == 1

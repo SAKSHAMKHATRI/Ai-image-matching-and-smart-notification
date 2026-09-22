@@ -1,8 +1,19 @@
+import pytest
 from fastapi.testclient import TestClient
 
 from app.auth import firebase
 from app import config
+from app.database import db
 from app.main import app
+
+
+@pytest.fixture(autouse=True)
+def isolated_auth_db(tmp_path, monkeypatch):
+    """Ensure auth tests run against a dedicated temporary test database."""
+    test_db = tmp_path / "auth_test.db"
+    monkeypatch.setattr(db, "get_database_path", lambda: test_db)
+    db.initialize_database()
+    yield
 
 
 client = TestClient(app)
@@ -55,12 +66,13 @@ def test_protected_endpoint_returns_verified_identity(monkeypatch) -> None:
     )
 
     assert response.status_code == 200
-    assert response.json() == {
-        "uid": "verified-user-123",
-        "email": "student@example.edu",
-        "email_verified": True,
-    }
-    assert "roll_number" not in response.json()
+    data = response.json()
+    assert data["uid"] == "verified-user-123"
+    assert data["email"] == "student@example.edu"
+    assert data["email_verified"] is True
+    assert data["role"] == "STUDENT"
+    assert data["is_admin"] is False
+    assert "roll_number" not in data
 
 
 def test_malformed_authorization_scheme_is_rejected() -> None:

@@ -417,9 +417,9 @@ export function AdminDashboard({ onBack }: AdminDashboardProps) {
               {usersList.map((u) => (
                 <tr key={u.id}>
                   <td>#{u.id}</td>
-                  <td><strong>{u.full_name || "No Profile"}</strong></td>
-                  <td>{u.email || u.firebase_uid.slice(0, 10)}</td>
-                  <td>{u.roll_number || "N/A"}</td>
+                  <td><strong>{u.full_name || (u.role === "ADMIN" ? "Administrator" : "—")}</strong></td>
+                  <td>{u.email || u.firebase_uid}</td>
+                  <td>{u.roll_number || "—"}</td>
                   <td><span className="role-tag">{u.role}</span></td>
                   <td>Lost: {u.lost_count} · Found: {u.found_count}</td>
                   <td>

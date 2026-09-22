@@ -58,5 +58,6 @@ class StudentProfileUpdate(StudentProfileBase):
 class StudentProfileResponse(StudentProfileBase):
     id: int
     firebase_uid: str
+    role: str = "STUDENT"
     created_at: str
     updated_at: str

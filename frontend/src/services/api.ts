@@ -17,13 +17,14 @@ export type StudentProfile = {
   phone_number: string;
   university_email: string;
   campus: string;
+  role?: string;
   created_at: string;
   updated_at: string;
 };
 
 export type StudentProfileInput = Omit<
   StudentProfile,
-  "id" | "firebase_uid" | "created_at" | "updated_at"
+  "id" | "firebase_uid" | "created_at" | "updated_at" | "role"
 >;
 
 export type LostItem = {
@@ -705,6 +706,23 @@ export type AdminAuditLogEntry = {
   details?: Record<string, unknown> | null;
   created_at: string;
 };
+
+export async function verifyAdminStatus(idToken: string): Promise<{
+  status: string;
+  uid: string;
+  email?: string;
+  role: string;
+  is_admin: boolean;
+}> {
+  const response = await fetch(`${apiBaseUrl}/api/admin/verify`, {
+    method: "GET",
+    headers: { Authorization: `Bearer ${idToken}` },
+  });
+  if (!response.ok) {
+    throw await readApiError(response, "Admin access denied.");
+  }
+  return response.json();
+}
 
 export async function getAdminOverview(idToken: string): Promise<AdminOverviewStats> {
   const response = await fetch(`${apiBaseUrl}/api/admin/overview`, {

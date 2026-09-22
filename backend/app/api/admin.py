@@ -48,6 +48,20 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 
 
+@router.get("/verify")
+def verify_admin_status(
+    admin_user: AuthenticatedUser = Depends(get_admin_user),
+) -> dict[str, Any]:
+    """Verify administrator authorization for the caller."""
+    return {
+        "status": "ok",
+        "uid": admin_user.uid,
+        "email": admin_user.email,
+        "role": admin_user.role,
+        "is_admin": True,
+    }
+
+
 @router.get("/overview", response_model=AdminOverviewStats)
 def get_overview(
     _admin: AuthenticatedUser = Depends(get_admin_user),

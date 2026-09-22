@@ -47,7 +47,7 @@ function validateProfile(profile: StudentProfileInput): FieldErrors {
     "campus",
   ];
   for (const field of required) {
-    if (!profile[field].toString().trim()) {
+    if (!profile[field]?.toString().trim()) {
       errors[field] = `${fieldLabels[field]} is required.`;
     }
   }

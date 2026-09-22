@@ -126,9 +126,9 @@ def get_all_users_admin(
     if search and search.strip():
         term = f"%{search.strip()}%"
         conditions.append(
-            "(p.full_name LIKE ? OR p.university_email LIKE ? OR p.roll_number LIKE ? OR u.firebase_uid LIKE ?)"
+            "(p.full_name LIKE ? OR u.display_name LIKE ? OR u.email LIKE ? OR p.university_email LIKE ? OR p.roll_number LIKE ? OR u.firebase_uid LIKE ?)"
         )
-        params.extend([term, term, term, term])
+        params.extend([term, term, term, term, term, term])
 
     where_clause = " AND ".join(conditions)
     query = f"""
@@ -139,8 +139,8 @@ def get_all_users_admin(
             u.role,
             u.created_at,
             u.updated_at,
-            p.full_name,
-            p.university_email as email,
+            COALESCE(p.full_name, u.display_name) AS full_name,
+            COALESCE(u.email, p.university_email) AS email,
             p.roll_number,
             p.campus,
             p.phone_number,
@@ -199,8 +199,8 @@ def get_user_detail_admin(user_id: int) -> dict[str, Any]:
         "role": user.get("role", "STUDENT"),
         "created_at": user["created_at"],
         "updated_at": user["updated_at"],
-        "full_name": profile.get("full_name"),
-        "email": profile.get("university_email"),
+        "full_name": profile.get("full_name") or user.get("display_name"),
+        "email": user.get("email") or profile.get("university_email"),
         "roll_number": profile.get("roll_number"),
         "campus": profile.get("campus"),
         "phone_number": profile.get("phone_number"),

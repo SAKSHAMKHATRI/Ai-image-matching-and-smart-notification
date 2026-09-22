@@ -38,6 +38,7 @@ export function Dashboard({
   const [error, setError] = useState<string | null>(null);
 
   const isAdmin = Boolean(
+    profile?.role === "ADMIN" ||
     userEmail?.toLowerCase().includes("admin") ||
     profile?.university_email?.toLowerCase().includes("admin")
   );

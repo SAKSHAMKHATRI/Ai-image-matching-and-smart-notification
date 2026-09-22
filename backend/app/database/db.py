@@ -28,6 +28,8 @@ def _create_schema(connection: sqlite3.Connection) -> None:
         CREATE TABLE IF NOT EXISTS users (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             firebase_uid TEXT NOT NULL UNIQUE,
+            email TEXT,
+            display_name TEXT,
             status TEXT NOT NULL DEFAULT 'ACTIVE'
                 CHECK (status IN ('ACTIVE', 'SUSPENDED', 'CLOSED')),
             role TEXT NOT NULL DEFAULT 'STUDENT'
@@ -225,6 +227,18 @@ def initialize_database() -> None:
             connection.execute(
                 "ALTER TABLE users ADD COLUMN status TEXT NOT NULL DEFAULT 'ACTIVE'"
             )
+        if "email" not in user_columns:
+            connection.execute(
+                "ALTER TABLE users ADD COLUMN email TEXT"
+            )
+        if "display_name" not in user_columns:
+            connection.execute(
+                "ALTER TABLE users ADD COLUMN display_name TEXT"
+            )
+
+        connection.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_firebase_uid ON users(firebase_uid)"
+        )
 
         # Backfill default values for existing user rows
         connection.execute(
@@ -232,6 +246,19 @@ def initialize_database() -> None:
         )
         connection.execute(
             "UPDATE users SET status = 'ACTIVE' WHERE status IS NULL OR status = ''"
+        )
+        connection.execute(
+            """
+            UPDATE users
+            SET email = (
+                SELECT university_email FROM student_profiles
+                WHERE student_profiles.firebase_uid = users.firebase_uid
+            )
+            WHERE email IS NULL AND EXISTS (
+                SELECT 1 FROM student_profiles
+                WHERE student_profiles.firebase_uid = users.firebase_uid
+            )
+            """
         )
 
         # Backfill missing embeddings for existing lost and found reports with text
@@ -278,7 +305,12 @@ def profile_row_to_dict(row: sqlite3.Row) -> dict[str, object]:
 def get_profile(firebase_uid: str) -> dict[str, object] | None:
     with get_connection() as connection:
         row = connection.execute(
-            "SELECT * FROM student_profiles WHERE firebase_uid = ?",
+            """
+            SELECT p.*, COALESCE(u.role, 'STUDENT') as role
+            FROM student_profiles p
+            LEFT JOIN users u ON p.firebase_uid = u.firebase_uid
+            WHERE p.firebase_uid = ?
+            """,
             (firebase_uid,),
         ).fetchone()
     return profile_row_to_dict(row) if row else None
@@ -327,12 +359,35 @@ def update_profile(firebase_uid: str, profile: dict[str, object]) -> dict[str, o
     return get_profile(firebase_uid)
 
 
-def ensure_user(firebase_uid: str, role: str = "STUDENT") -> int:
+def ensure_user(
+    firebase_uid: str,
+    role: str = "STUDENT",
+    email: str | None = None,
+    display_name: str | None = None,
+) -> int:
     with get_connection() as connection:
         connection.execute(
-            "INSERT OR IGNORE INTO users (firebase_uid, role) VALUES (?, ?)",
-            (firebase_uid, role),
+            """
+            INSERT OR IGNORE INTO users (firebase_uid, role, email, display_name)
+            VALUES (?, ?, ?, ?)
+            """,
+            (firebase_uid, role, email, display_name),
         )
+        updates: list[str] = []
+        params: list[Any] = []
+        if email is not None:
+            updates.append("email = ?")
+            params.append(email)
+        if display_name is not None:
+            updates.append("display_name = ?")
+            params.append(display_name)
+        if updates:
+            updates.append("updated_at = CURRENT_TIMESTAMP")
+            params.append(firebase_uid)
+            connection.execute(
+                f"UPDATE users SET {', '.join(updates)} WHERE firebase_uid = ?",
+                tuple(params),
+            )
         row = connection.execute(
             "SELECT id FROM users WHERE firebase_uid = ?",
             (firebase_uid,),
@@ -354,7 +409,7 @@ def get_user_id(firebase_uid: str) -> int | None:
 def get_user_record(user_id: int) -> dict[str, Any] | None:
     with get_connection() as connection:
         row = connection.execute(
-            "SELECT id, firebase_uid, status, role, created_at, updated_at FROM users WHERE id = ?",
+            "SELECT id, firebase_uid, email, display_name, status, role, created_at, updated_at FROM users WHERE id = ?",
             (user_id,),
         ).fetchone()
         return dict(row) if row else None
@@ -363,7 +418,7 @@ def get_user_record(user_id: int) -> dict[str, Any] | None:
 def get_user_by_firebase_uid(firebase_uid: str) -> dict[str, Any] | None:
     with get_connection() as connection:
         row = connection.execute(
-            "SELECT id, firebase_uid, status, role, created_at, updated_at FROM users WHERE firebase_uid = ?",
+            "SELECT id, firebase_uid, email, display_name, status, role, created_at, updated_at FROM users WHERE firebase_uid = ?",
             (firebase_uid,),
         ).fetchone()
         return dict(row) if row else None
