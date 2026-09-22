@@ -30,6 +30,9 @@ dist/
 *.sqlite3
 *.log
 coverage/
+backend/data/
+data/
+uploads/
 
 # Editor and OS
 .vscode/*

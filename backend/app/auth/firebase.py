@@ -1,3 +1,4 @@
+import os
 from functools import lru_cache
 from typing import Any
 
@@ -11,18 +12,19 @@ from app.config import FirebaseConfigError, get_firebase_options
 
 
 class AuthenticatedUser(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
 
     uid: str
     email: str | None = None
     email_verified: bool = False
+    role: str = "STUDENT"
+    is_admin: bool = False
 
 
 bearer_scheme = HTTPBearer(auto_error=False)
 
 
 @lru_cache
-
 def get_firebase_app() -> firebase_admin.App:
     try:
         options = get_firebase_options()
@@ -74,6 +76,40 @@ def verify_firebase_token(token: str) -> dict[str, Any]:
         ) from exc
 
 
+def is_admin_email_or_uid(email: str | None, uid: str) -> bool:
+    """Check if the given email or UID is in the designated administrator lists."""
+    admin_emails_raw = os.getenv(
+        "ADMIN_EMAILS", "admin@chitkara.edu.in"
+    )
+    admin_emails = {e.strip().lower() for e in admin_emails_raw.split(",") if e.strip()}
+    if email and email.strip().lower() in admin_emails:
+        return True
+
+    admin_uids_raw = os.getenv("ADMIN_UIDS", "p8e0wyuFNFOAdKp10yZL4Fylng73")
+    admin_uids = {u.strip() for u in admin_uids_raw.split(",") if u.strip()}
+    if uid in admin_uids:
+        return True
+
+    return False
+
+
+def is_admin_user(user: AuthenticatedUser) -> bool:
+    """Check if the given authenticated user has administrator privileges."""
+    if user.is_admin or user.role == "ADMIN":
+        return True
+
+    if is_admin_email_or_uid(user.email, user.uid):
+        return True
+
+    from app.database import db
+
+    user_rec = db.get_user_by_firebase_uid(user.uid)
+    if user_rec and user_rec.get("role") == "ADMIN":
+        return True
+
+    return False
+
+
 def get_current_user(
     credentials_header: HTTPAuthorizationCredentials | None = Security(bearer_scheme),
 ) -> AuthenticatedUser:
@@ -99,6 +135,7 @@ def get_current_user(
             detail="Invalid or expired authentication token.",
             headers={"WWW-Authenticate": "Bearer"},
         ) from exc
+
     uid = decoded_token.get("uid")
     if not isinstance(uid, str) or not uid:
         raise HTTPException(
@@ -108,8 +145,85 @@ def get_current_user(
         )
 
     email = decoded_token.get("email")
+    email_str = email if isinstance(email, str) else None
+    display_name = decoded_token.get("name")
+    display_name_str = display_name if isinstance(display_name, str) else None
+    email_verified = decoded_token.get("email_verified") is True
+
+    from app.database import db
+
+    user_rec = db.get_user_by_firebase_uid(uid)
+    if user_rec:
+        role = user_rec.get("role", "STUDENT")
+        db.ensure_user(
+            uid,
+            role=role,
+            email=email_str,
+            display_name=display_name_str,
+        )
+    else:
+        # Check if user qualifies as admin on initial discovery
+        role = "ADMIN" if is_admin_email_or_uid(email_str, uid) else "STUDENT"
+        db.ensure_user(
+            uid,
+            role=role,
+            email=email_str,
+            display_name=display_name_str,
+        )
+
+    is_admin = is_admin_user(
+        AuthenticatedUser(
+            uid=uid,
+            email=email_str,
+            email_verified=email_verified,
+            role=role,
+        )
+    )
+
+    if is_admin and role != "ADMIN":
+        # Synchronize DB record with admin designation
+        user_id = db.ensure_user(
+            uid,
+            email=email_str,
+            display_name=display_name_str,
+        )
+        with db.get_connection() as conn:
+            conn.execute("UPDATE users SET role = 'ADMIN' WHERE id = ?", (user_id,))
+        role = "ADMIN"
+
     return AuthenticatedUser(
         uid=uid,
-        email=email if isinstance(email, str) else None,
-        email_verified=decoded_token.get("email_verified") is True,
+        email=email_str,
+        email_verified=email_verified,
+        role=role,
+        is_admin=is_admin,
+    )
+
+
+def get_admin_user(
+    current_user: AuthenticatedUser = Security(get_current_user),
+) -> AuthenticatedUser:
+    """Dependency that enforces role-based administrator authorization."""
+    from app.database import db
+
+    user_rec = db.get_user_by_firebase_uid(current_user.uid)
+    if user_rec and user_rec.get("status") == "SUSPENDED":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Your account has been suspended.",
+        )
+
+    if not is_admin_user(current_user):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Administrator access required.",
+        )
+
+    role = user_rec.get("role", "ADMIN") if user_rec else "ADMIN"
+    return AuthenticatedUser(
+        uid=current_user.uid,
+        email=current_user.email,
+        email_verified=current_user.email_verified,
+        role=role,
+        is_admin=True,
     )

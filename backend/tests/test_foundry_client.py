@@ -82,11 +82,65 @@ def test_successful_foundry_response_is_normalized(monkeypatch) -> None:
     }
 
 
-def test_foundry_failures_are_safe_and_retry_bounded(monkeypatch) -> None:
+def test_foundry_vision_response_is_parsed_and_normalized(monkeypatch) -> None:
     config = foundry_client.FoundryConfig(
         project_endpoint="https://resource.services.ai.azure.com/api/projects/project",
         api_key="test-secret-key",
-        model_name="vision-deployment",
+        model_name="gpt-5-mini",
+        timeout_seconds=5,
+        max_retries=1,
+    )
+    captured: dict[str, object] = {}
+
+    def fake_post(url, headers, json, timeout):
+        captured.update({"url": url, "headers": headers, "json": json, "timeout": timeout})
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {
+                            "content": (
+                                '{"description": "Black insulated stainless steel water bottle.",'
+                                ' "object_type": "water bottle", "category": "Personal Items",'
+                                ' "primary_color": "black", "secondary_colors": ["silver"],'
+                                ' "brand": "Hydro Flask", "visible_features": ["scratches on base"],'
+                                ' "visible_text": ["Hydro Flask"], "confidence": 0.95}'
+                            )
+                        }
+                    }
+                ]
+            },
+            request=httpx.Request("POST", url),
+        )
+
+    monkeypatch.setattr(foundry_client.httpx, "post", fake_post)
+
+    result = foundry_client.FoundryClient(config).analyze_image(
+        b"\x89PNG\r\n\x1a\nfakeimage",
+        mime_type="image/png",
+    )
+
+    assert result.description == "Black insulated stainless steel water bottle."
+    assert result.attributes["object_type"] == "water bottle"
+    assert result.attributes["category"] == "Personal Items"
+    assert result.attributes["primary_color"] == "black"
+    assert result.attributes["brand"] == "Hydro Flask"
+    assert result.attributes["visible_features"] == ["scratches on base"]
+    assert result.attributes["visible_text"] == ["Hydro Flask"]
+    assert result.attributes["confidence"] == 0.95
+    assert str(captured["url"]).endswith("/openai/v1/chat/completions")
+    assert captured["headers"] == {
+        "api-key": "test-secret-key",
+        "Content-Type": "application/json",
+    }
+
+
+def test_foundry_vision_failures_are_safe_and_retry_bounded(monkeypatch) -> None:
+    config = foundry_client.FoundryConfig(
+        project_endpoint="https://resource.services.ai.azure.com/api/projects/project",
+        api_key="test-secret-key",
+        model_name="gpt-5-mini",
         timeout_seconds=5,
         max_retries=2,
     )
@@ -100,8 +154,9 @@ def test_foundry_failures_are_safe_and_retry_bounded(monkeypatch) -> None:
     monkeypatch.setattr(foundry_client.httpx, "post", fail_post)
 
     with pytest.raises(foundry_client.FoundryServiceError) as error:
-        foundry_client.FoundryClient(config).analyze_text("Analyze this item.")
+        foundry_client.FoundryClient(config).analyze_image(b"\x89PNG\r\n\x1a\nfakeimage")
 
     assert attempts == 3
-    assert str(error.value) == "Microsoft Foundry request failed."
+    assert str(error.value) == "Microsoft Foundry vision request failed."
     assert "private network detail" not in str(error.value)
+    assert "test-secret-key" not in str(error.value)

@@ -2,7 +2,17 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.config import FirebaseConfigError
+from app.database import db
 from app.main import app
+
+
+@pytest.fixture(autouse=True)
+def isolated_auth_config_db(tmp_path, monkeypatch):
+    """Ensure tests run against a dedicated temporary test database."""
+    test_db = tmp_path / "auth_config_test.db"
+    monkeypatch.setattr(db, "get_database_path", lambda: test_db)
+    db.initialize_database()
+    yield
 
 
 @pytest.fixture

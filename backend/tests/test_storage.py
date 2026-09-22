@@ -123,3 +123,24 @@ def test_other_owner_cannot_upload_to_report(storage_client, monkeypatch) -> Non
     )
 
     assert response.status_code == 404
+
+
+def test_storage_bucket_name_fallback(monkeypatch) -> None:
+    from app.config import get_storage_bucket_name
+    monkeypatch.delenv("FIREBASE_STORAGE_BUCKET", raising=False)
+    monkeypatch.setattr("app.config.get_firebase_options", lambda: {"projectId": "test-project-123"})
+    assert get_storage_bucket_name() == "test-project-123.appspot.com"
+
+
+def test_storage_failure_returns_503(storage_client, monkeypatch) -> None:
+    item_id = create_report(storage_client)
+    def raise_storage_error(*args, **kwargs):
+        raise RuntimeError("Cloud Storage network timeout")
+
+    monkeypatch.setattr(lost_items, "store_image", raise_storage_error)
+    response = storage_client.post(
+        f"/api/lost-items/{item_id}/image",
+        files={"image": ("photo.jpg", b"\xff\xd8\xffimage-bytes", "image/jpeg")},
+    )
+    assert response.status_code == 503
+    assert "Image storage is temporarily unavailable" in response.json()["detail"]
