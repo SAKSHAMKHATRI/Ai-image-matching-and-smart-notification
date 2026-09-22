@@ -400,6 +400,7 @@ export function ProtectedPage({ initialView = "dashboard", onNavigate }: Protect
   const [view, setView] = useState<DashboardView>(initialView);
   const [selectedFoundItem, setSelectedFoundItem] = useState<FoundItem | null>(null);
   const [selectedLostItem, setSelectedLostItem] = useState<LostItem | null>(null);
+  const [selectedLostItemId, setSelectedLostItemId] = useState<number | null>(null);
 
   useEffect(() => {
     setView(initialView);
@@ -420,9 +421,16 @@ export function ProtectedPage({ initialView = "dashboard", onNavigate }: Protect
         onSelectFoundItemForMatches={(item) => {
           setSelectedFoundItem(item);
           setSelectedLostItem(null);
+          setSelectedLostItemId(null);
         }}
         onSelectLostItemForMatches={(item) => {
           setSelectedLostItem(item);
+          setSelectedLostItemId(item.id);
+          setSelectedFoundItem(null);
+        }}
+        onSelectLostItemIdForMatches={(lostId) => {
+          setSelectedLostItemId(lostId);
+          setSelectedLostItem(null);
           setSelectedFoundItem(null);
         }}
       />
@@ -456,10 +464,11 @@ export function ProtectedPage({ initialView = "dashboard", onNavigate }: Protect
           onNavigateToFoundReport={() => handleNavigate("found")}
         />
       )}
-      {view === "matches" && (selectedFoundItem || selectedLostItem) && (
+      {view === "matches" && (selectedFoundItem || selectedLostItem || selectedLostItemId) && (
         <MatchResultsView
           foundItem={selectedFoundItem}
           lostItem={selectedLostItem}
+          lostItemId={selectedLostItemId}
           onBack={() => handleNavigate("dashboard")}
         />
       )}

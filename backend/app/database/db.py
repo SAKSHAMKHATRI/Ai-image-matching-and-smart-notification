@@ -144,6 +144,23 @@ def _create_schema(connection: sqlite3.Connection) -> None:
             FOREIGN KEY (actor_user_id) REFERENCES users(id) ON DELETE SET NULL
         );
 
+        CREATE TABLE IF NOT EXISTS notifications (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            type TEXT NOT NULL DEFAULT 'POSSIBLE_MATCH'
+                CHECK (type IN ('POSSIBLE_MATCH', 'CLAIM_SUBMITTED', 'CLAIM_STATUS', 'CLAIM_UPDATE', 'STATUS_CHANGE', 'SYSTEM')),
+            title TEXT NOT NULL,
+            message TEXT NOT NULL,
+            entity_type TEXT,
+            entity_id INTEGER,
+            is_read INTEGER NOT NULL DEFAULT 0,
+            email_status TEXT NOT NULL DEFAULT 'SKIPPED',
+            email_recipient TEXT,
+            email_error TEXT,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        );
+
         CREATE INDEX IF NOT EXISTS idx_lost_items_user_id ON lost_items(user_id);
         CREATE INDEX IF NOT EXISTS idx_lost_items_status ON lost_items(status);
         CREATE INDEX IF NOT EXISTS idx_found_items_user_id ON found_items(user_id);
@@ -154,6 +171,8 @@ def _create_schema(connection: sqlite3.Connection) -> None:
         CREATE INDEX IF NOT EXISTS idx_claims_claimant_user_id ON claims(claimant_user_id);
         CREATE INDEX IF NOT EXISTS idx_audit_events_entity
             ON audit_events(entity_type, entity_id);
+        CREATE INDEX IF NOT EXISTS idx_notifications_user_id ON notifications(user_id);
+        CREATE INDEX IF NOT EXISTS idx_notifications_is_read ON notifications(is_read);
         """
     )
     connection.execute(
@@ -239,6 +258,21 @@ def initialize_database() -> None:
         connection.execute(
             "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_firebase_uid ON users(firebase_uid)"
         )
+
+        # Idempotent column migrations for notifications
+        notif_columns = {
+            row[1]
+            for row in connection.execute("PRAGMA table_info(notifications)")
+        }
+        for column, definition in (
+            ("email_status", "TEXT NOT NULL DEFAULT 'SKIPPED'"),
+            ("email_recipient", "TEXT"),
+            ("email_error", "TEXT"),
+        ):
+            if column not in notif_columns:
+                connection.execute(
+                    f"ALTER TABLE notifications ADD COLUMN {column} {definition}"
+                )
 
         # Backfill default values for existing user rows
         connection.execute(
