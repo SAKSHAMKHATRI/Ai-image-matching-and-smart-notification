@@ -15,6 +15,26 @@ LOST_ITEM_FIELDS = {
     "image_reference",
 }
 
+FOUND_ITEM_FIELDS = {
+    "campus",
+    "found_at",
+    "location",
+    "item_name",
+    "category",
+    "color",
+    "brand",
+    "description",
+    "distinctive_features",
+    "image_reference",
+    "ai_attributes_json",
+    "analysis_status",
+    "analysis_error",
+    "analysis_requested_at",
+    "analysis_completed_at",
+    "status",
+}
+
+
 
 def create_lost_item(user_id: int, item_name: str, **fields: Any) -> int:
     return db.insert_record(
@@ -97,6 +117,9 @@ def update_found_item_for_user(
     item_id: int,
     fields: dict[str, Any],
 ) -> dict[str, Any] | None:
+    unknown_fields = set(fields) - FOUND_ITEM_FIELDS
+    if unknown_fields:
+        raise ValueError("Unsupported found-item fields.")
     assignments = ", ".join(f"{field} = ?" for field in fields)
     values = (*fields.values(), item_id, user_id)
     with db.get_connection() as connection:
@@ -111,6 +134,7 @@ def update_found_item_for_user(
         if cursor.rowcount == 0:
             return None
     return get_found_item_for_user(user_id, item_id)
+
 
 
 def create_match(found_item_id: int, lost_item_id: int, **fields: Any) -> int:

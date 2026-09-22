@@ -50,12 +50,45 @@ export type FoundItem = {
   found_date: string;
   found_location: string | null;
   campus: string | null;
+  item_name?: string | null;
+  category?: string | null;
+  color?: string | null;
+  brand?: string | null;
+  description?: string | null;
+  distinctive_features?: string | null;
   image_reference: string | null;
+  ai_attributes?: Record<string, unknown> | null;
   analysis_status: string;
   analysis_error: string | null;
   created_at: string;
   updated_at: string;
 };
+
+export type FoundItemInput = {
+  found_date: string;
+  found_location?: string | null;
+  campus?: string | null;
+  item_name?: string | null;
+  category?: string | null;
+  color?: string | null;
+  brand?: string | null;
+  description?: string | null;
+  distinctive_features?: string | null;
+  ai_attributes_json?: string | null;
+};
+
+export type ImageAnalysisResult = {
+  success: boolean;
+  message: string;
+  description?: string | null;
+  item_name?: string | null;
+  category?: string | null;
+  color?: string | null;
+  brand?: string | null;
+  distinctive_features?: string | null;
+  attributes?: Record<string, unknown> | null;
+};
+
 
 /** Field-level validation messages returned by the backend (FastAPI 422). */
 export type FieldErrors = Partial<Record<string, string>>;
@@ -258,23 +291,46 @@ export async function uploadLostItemImage(
   return response.json() as Promise<LostItem>;
 }
 
+export async function analyzeItemImage(
+  idToken: string,
+  image: File,
+): Promise<ImageAnalysisResult> {
+  const formData = new FormData();
+  formData.append("image", image);
+  const response = await fetch(`${apiBaseUrl}/api/found-items/analyze-image`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${idToken}` },
+    body: formData,
+  });
+  if (!response.ok) {
+    throw await readApiError(response, "Image analysis could not be completed.");
+  }
+  return response.json() as Promise<ImageAnalysisResult>;
+}
+
 export async function createFoundItem(
   idToken: string,
-  foundDate: string,
-  foundLocation: string,
-  campus: string,
+  input: FoundItemInput | string,
+  foundLocation?: string,
+  campus?: string,
 ): Promise<FoundItem> {
+  let bodyPayload: FoundItemInput;
+  if (typeof input === "string") {
+    bodyPayload = {
+      found_date: input,
+      found_location: foundLocation || null,
+      campus: campus || null,
+    };
+  } else {
+    bodyPayload = input;
+  }
   const response = await fetch(`${apiBaseUrl}/api/found-items`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${idToken}`,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({
-      found_date: foundDate,
-      found_location: foundLocation || null,
-      campus: campus || null,
-    }),
+    body: JSON.stringify(bodyPayload),
   });
   if (!response.ok) {
     throw await readApiError(response, "Found item could not be reported.");
@@ -303,7 +359,7 @@ export async function uploadFoundItemImage(
 export async function triggerFoundItemAnalysis(
   idToken: string,
   itemId: number,
-): Promise<{ found_item: FoundItem; accepted: boolean; message: string }> {
+): Promise<{ found_item: FoundItem; accepted: boolean; message: string; attributes?: Record<string, unknown> | null }> {
   const response = await fetch(`${apiBaseUrl}/api/found-items/${itemId}/analyze`, {
     method: "POST",
     headers: { Authorization: `Bearer ${idToken}` },
@@ -315,7 +371,9 @@ export async function triggerFoundItemAnalysis(
     found_item: FoundItem;
     accepted: boolean;
     message: string;
+    attributes?: Record<string, unknown> | null;
   }>;
 }
+
 
 export { networkError };

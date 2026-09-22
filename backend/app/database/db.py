@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any
 
 DEFAULT_DATABASE_PATH = Path(__file__).resolve().parents[2] / "data" / "profiles.db"
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 
 def get_database_path() -> Path:
@@ -77,9 +77,16 @@ def _create_schema(connection: sqlite3.Connection) -> None:
             campus TEXT,
             found_at TEXT,
             location TEXT,
+            item_name TEXT,
+            category TEXT,
+            color TEXT,
+            brand TEXT,
+            description TEXT,
+            distinctive_features TEXT,
             image_reference TEXT,
+            ai_attributes_json TEXT,
             analysis_status TEXT NOT NULL DEFAULT 'NOT_REQUESTED'
-                CHECK (analysis_status IN ('NOT_REQUESTED', 'QUEUED', 'UNAVAILABLE', 'FAILED')),
+                CHECK (analysis_status IN ('NOT_REQUESTED', 'QUEUED', 'ANALYZED', 'UNAVAILABLE', 'FAILED')),
             analysis_error TEXT,
             analysis_requested_at TEXT,
             analysis_completed_at TEXT,
@@ -171,7 +178,7 @@ def initialize_database() -> None:
                     connection.execute(
                         f"ALTER TABLE lost_items ADD COLUMN {column} {definition}"
                     )
-        if current_version < SCHEMA_VERSION:
+        if current_version < 3:
             columns = {
                 row[1]
                 for row in connection.execute("PRAGMA table_info(found_items)")
@@ -186,7 +193,26 @@ def initialize_database() -> None:
                     connection.execute(
                         f"ALTER TABLE found_items ADD COLUMN {column} {definition}"
                     )
+        if current_version < SCHEMA_VERSION:
+            columns = {
+                row[1]
+                for row in connection.execute("PRAGMA table_info(found_items)")
+            }
+            for column, definition in (
+                ("item_name", "TEXT"),
+                ("category", "TEXT"),
+                ("color", "TEXT"),
+                ("brand", "TEXT"),
+                ("description", "TEXT"),
+                ("distinctive_features", "TEXT"),
+                ("ai_attributes_json", "TEXT"),
+            ):
+                if column not in columns:
+                    connection.execute(
+                        f"ALTER TABLE found_items ADD COLUMN {column} {definition}"
+                    )
             connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+
 
 
 def profile_row_to_dict(row: sqlite3.Row) -> dict[str, object]:

@@ -1,4 +1,5 @@
 from datetime import date
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -9,8 +10,25 @@ class FoundItemCreate(BaseModel):
     found_date: date
     found_location: str | None = Field(default=None, max_length=160)
     campus: str | None = Field(default=None, max_length=100)
+    item_name: str | None = Field(default=None, max_length=120)
+    category: str | None = Field(default=None, max_length=80)
+    color: str | None = Field(default=None, max_length=60)
+    brand: str | None = Field(default=None, max_length=80)
+    description: str | None = Field(default=None, max_length=2000)
+    distinctive_features: str | None = Field(default=None, max_length=1000)
+    ai_attributes_json: str | None = None
 
-    @field_validator("found_location", "campus", mode="before")
+    @field_validator(
+        "found_location",
+        "campus",
+        "item_name",
+        "category",
+        "color",
+        "brand",
+        "description",
+        "distinctive_features",
+        mode="before",
+    )
     @classmethod
     def strip_optional_text(cls, value: object) -> object:
         if not isinstance(value, str):
@@ -25,16 +43,40 @@ class FoundItemResponse(BaseModel):
     id: int
     status: str
     found_date: date
-    found_location: str | None
-    campus: str | None
-    image_reference: str | None
+    found_location: str | None = None
+    campus: str | None = None
+    item_name: str | None = None
+    category: str | None = None
+    color: str | None = None
+    brand: str | None = None
+    description: str | None = None
+    distinctive_features: str | None = None
+    image_reference: str | None = None
+    ai_attributes: dict[str, Any] | None = None
     analysis_status: str
-    analysis_error: str | None
+    analysis_error: str | None = None
     created_at: str
     updated_at: str
 
 
 class AnalysisTriggerResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     found_item: FoundItemResponse
     accepted: bool
     message: str
+    attributes: dict[str, Any] | None = None
+
+
+class ImageAnalysisPreviewResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    success: bool
+    message: str
+    description: str | None = None
+    item_name: str | None = None
+    category: str | None = None
+    color: str | None = None
+    brand: str | None = None
+    distinctive_features: str | None = None
+    attributes: dict[str, Any] | None = None

@@ -75,3 +75,29 @@ def store_image(
     blob.metadata = {"firebase_uid": firebase_uid, "lost_item_id": str(item_id)}
     blob.patch()
     return StoredImage(path=path, content_type=content_type, size=len(contents))
+
+
+def get_image_bytes(image_reference: str) -> tuple[bytes, str]:
+    """Retrieve stored image bytes and content-type from Firebase Storage."""
+    if not image_reference:
+        raise ValueError("Image reference cannot be empty.")
+
+    blob = get_storage_bucket().blob(image_reference)
+    contents = blob.download_as_bytes()
+    if not contents:
+        raise ValueError("Image content is empty.")
+
+    # Infer content type from extension or blob
+    content_type = blob.content_type
+    if not content_type:
+        ext = image_reference.rsplit(".", 1)[-1].lower() if "." in image_reference else ""
+        if ext in ("jpg", "jpeg"):
+            content_type = "image/jpeg"
+        elif ext == "png":
+            content_type = "image/png"
+        elif ext == "webp":
+            content_type = "image/webp"
+        else:
+            content_type = "image/jpeg"
+
+    return contents, content_type

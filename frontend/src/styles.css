@@ -294,9 +294,47 @@ label:has(.field-error) input {
 }
 
 textarea {
+  width: 100%;
+  border: 1px solid rgba(31, 42, 36, 0.25);
+  padding: 0.8rem;
+  color: #1f2a24;
+  background: #fffdf7;
+  font: inherit;
   min-height: 5rem;
   resize: vertical;
 }
+
+textarea:focus-visible {
+  outline: 3px solid #b04a35;
+  outline-offset: 2px;
+}
+
+.ai-status-note {
+  padding: 0.65rem 0.85rem;
+  font-size: 0.85rem;
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  background: #e8f0eb;
+  color: #28583d;
+  border-left: 3px solid #3f9a5b;
+  margin: 0.25rem 0;
+}
+
+.ai-status-note.unavailable {
+  background: #fdf3e7;
+  color: #8a5a1f;
+  border-left-color: #d9822b;
+}
+
+.ai-analyzing-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #53645a;
+  margin-top: 0.25rem;
+}
+
 
 .report-list {
   display: grid;
