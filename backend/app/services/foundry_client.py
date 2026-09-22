@@ -22,7 +22,7 @@ DEFAULT_SYSTEM_PROMPT = (
     "{\n"
     '  "description": string (a concise 1-2 sentence description of the item),\n'
     '  "object_type": string or null (e.g., "water bottle", "backpack", "umbrella", "earbuds", "keys", "student ID", "jacket", "laptop", etc.),\n'
-    '  "category": string or null (e.g., "Electronics", "Bags & Wallets", "Clothing & Accessories", "Documents & Cards", "Keys & Eyewear", "Personal Items", "Other"),\n'
+    '  "category": string or null (e.g., "Electronics", "Bags & Backpacks", "Clothing & Accessories", "Documents & Cards", "Keys & Eyewear", "Books & Stationery", "Bottles & Containers", "Personal Items", "Jewelry & Watches", "Sports & Recreation", "Other"),\n'
     '  "primary_color": string or null,\n'
     '  "secondary_colors": list of strings,\n'
     '  "brand": string or null,\n'
@@ -48,6 +48,7 @@ class FoundryConfig:
     model_name: str
     timeout_seconds: float
     max_retries: int
+    embedding_model_name: str = "text-embedding-3-small"
 
 
 @lru_cache
@@ -55,6 +56,8 @@ def get_foundry_config() -> FoundryConfig:
     endpoint = os.getenv("FOUNDRY_PROJECT_ENDPOINT", "").strip().rstrip("/")
     api_key = os.getenv("FOUNDRY_API_KEY", "").strip()
     model_name = os.getenv("FOUNDRY_MODEL_NAME", "").strip()
+    embedding_model_name = os.getenv("FOUNDRY_EMBEDDING_MODEL_NAME", "text-embedding-3-small").strip() or "text-embedding-3-small"
+
     if not endpoint or not endpoint.startswith("https://"):
         raise FoundryConfigurationError("FOUNDRY_PROJECT_ENDPOINT is not configured.")
     if not api_key or api_key.startswith("replace-with-"):
@@ -76,6 +79,7 @@ def get_foundry_config() -> FoundryConfig:
         model_name=model_name,
         timeout_seconds=timeout_seconds,
         max_retries=max_retries,
+        embedding_model_name=embedding_model_name,
     )
 
 
@@ -168,6 +172,68 @@ class FoundryClient:
         if base.endswith("/openai/v1"):
             return f"{base}/chat/completions"
         return f"{base}/openai/v1/chat/completions"
+
+    @property
+    def embeddings_url(self) -> str:
+        base = self.config.project_endpoint.rstrip("/")
+        if "/api/projects" in base:
+            base = base.split("/api/projects")[0]
+        if base.endswith("/openai/v1"):
+            return f"{base}/embeddings"
+        return f"{base}/openai/v1/embeddings"
+
+    def generate_embedding(self, text: str) -> list[float]:
+        """Generate vector embedding using Azure OpenAI / Foundry embedding endpoint."""
+        if not text or not text.strip():
+            raise ValueError("Embedding input text cannot be empty.")
+
+        payload = {
+            "model": self.config.embedding_model_name,
+            "input": text.strip(),
+        }
+        headers = {
+            "api-key": self.config.api_key,
+            "Content-Type": "application/json",
+        }
+
+        last_error: Exception | None = None
+        for attempt in range(self.config.max_retries + 1):
+            try:
+                response = httpx.post(
+                    self.embeddings_url,
+                    headers=headers,
+                    json=payload,
+                    timeout=self.config.timeout_seconds,
+                )
+                if response.status_code in (400, 404):
+                    logger.info(
+                        "Foundry embedding deployment unavailable (%d); generating semantic feature vector.",
+                        response.status_code,
+                    )
+                    from app.services.embedding_service import generate_semantic_feature_vector
+                    return generate_semantic_feature_vector(text.strip())
+
+                response.raise_for_status()
+                body = response.json()
+
+                data = body.get("data")
+                if isinstance(data, list) and len(data) > 0:
+                    embedding = data[0].get("embedding")
+                    if isinstance(embedding, list) and all(isinstance(x, (int, float)) for x in embedding):
+                        return [float(x) for x in embedding]
+                raise FoundryServiceError("Foundry embeddings response missing or malformed vector data.")
+            except (httpx.HTTPError, ValueError, FoundryServiceError) as exc:
+                last_error = exc
+                logger.warning(
+                    "Foundry embedding attempt %d/%d failed: %s",
+                    attempt + 1,
+                    self.config.max_retries + 1,
+                    type(exc).__name__,
+                )
+                if attempt < self.config.max_retries:
+                    continue
+
+        raise FoundryServiceError("Microsoft Foundry embedding request failed.") from last_error
 
     def analyze_text(self, prompt: str) -> FoundryResponse:
         payload = {

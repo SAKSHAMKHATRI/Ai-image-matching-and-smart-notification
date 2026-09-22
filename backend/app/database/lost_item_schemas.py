@@ -11,6 +11,7 @@ class LostItemBase(BaseModel):
     category: str = Field(min_length=2, max_length=80)
     color: str | None = Field(default=None, max_length=60)
     brand: str | None = Field(default=None, max_length=80)
+    campus: str | None = Field(default=None, max_length=100)
     lost_date: date
     approximate_location: str = Field(min_length=2, max_length=160)
     description: str = Field(min_length=10, max_length=2000)
@@ -22,6 +23,7 @@ class LostItemBase(BaseModel):
         "category",
         "color",
         "brand",
+        "campus",
         "approximate_location",
         "description",
         "distinctive_features",

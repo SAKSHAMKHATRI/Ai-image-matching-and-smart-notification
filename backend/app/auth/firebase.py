@@ -1,8 +1,9 @@
+import os
 from functools import lru_cache
 from typing import Any
 
 import firebase_admin
-from fastapi import HTTPException, Security, status
+from fastapi import Depends, HTTPException, Security, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from firebase_admin import auth, credentials, storage
 from pydantic import BaseModel, ConfigDict
@@ -22,7 +23,6 @@ bearer_scheme = HTTPBearer(auto_error=False)
 
 
 @lru_cache
-
 def get_firebase_app() -> firebase_admin.App:
     try:
         options = get_firebase_options()
@@ -113,3 +113,47 @@ def get_current_user(
         email=email if isinstance(email, str) else None,
         email_verified=decoded_token.get("email_verified") is True,
     )
+
+
+def is_admin_user(user: AuthenticatedUser) -> bool:
+    """Check if the given authenticated user has administrator privileges."""
+    admin_emails_raw = os.getenv("ADMIN_EMAILS", "admin@university.edu")
+    admin_emails = {e.strip().lower() for e in admin_emails_raw.split(",") if e.strip()}
+    if user.email and user.email.strip().lower() in admin_emails:
+        return True
+
+    admin_uids_raw = os.getenv("ADMIN_UIDS", "")
+    admin_uids = {u.strip() for u in admin_uids_raw.split(",") if u.strip()}
+    if user.uid in admin_uids:
+        return True
+
+    # Check database role
+    from app.database import db
+
+    user_rec = db.get_user_by_firebase_uid(user.uid)
+    if user_rec and user_rec.get("role") == "ADMIN":
+        return True
+
+    return False
+
+
+def get_admin_user(
+    current_user: AuthenticatedUser = Depends(get_current_user),
+) -> AuthenticatedUser:
+    """Dependency that enforces role-based administrator authorization."""
+    from app.database import db
+
+    user_rec = db.get_user_by_firebase_uid(current_user.uid)
+    if user_rec and user_rec.get("status") == "SUSPENDED":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Your account has been suspended.",
+        )
+
+    if not is_admin_user(current_user):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Administrator access required.",
+        )
+
+    return current_user

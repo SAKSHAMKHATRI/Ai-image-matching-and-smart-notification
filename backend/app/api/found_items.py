@@ -11,13 +11,23 @@ from app.database.found_item_schemas import (
     AnalysisTriggerResponse,
     FoundItemCreate,
     FoundItemResponse,
+    FoundItemUpdate,
     ImageAnalysisPreviewResponse,
+    OCRPreviewResponse,
 )
 from app.services.analysis_service import (
     AnalysisFailed,
     AnalysisRequest,
     AnalysisUnavailable,
     get_analysis_provider,
+)
+from app.services.embedding_service import get_embedding_provider, serialize_embedding
+from app.services.matching_service import evaluate_and_persist_matches_for_found_item
+from app.services.ocr_service import (
+    OCRFailed,
+    OCRRequest,
+    OCRUnavailable,
+    get_ocr_provider,
 )
 from app.services.storage_service import store_image, validate_and_read_image
 
@@ -78,7 +88,16 @@ async def analyze_image_preview(
         provider = get_analysis_provider()
         result = provider.analyze_bytes(contents, content_type=content_type)
         attrs = result.attributes
-        distinctive_features = ", ".join(attrs.get("visible_features", [])) if attrs.get("visible_features") else None
+        features_list = attrs.get("visible_features", [])
+        distinctive_features = ", ".join(features_list) if features_list else None
+        visible_text_list = attrs.get("visible_text", [])
+        if visible_text_list:
+            text_str = ", ".join(str(t) for t in visible_text_list if str(t).strip())
+            if text_str:
+                if distinctive_features:
+                    distinctive_features = f"{distinctive_features} (Text: {text_str})"
+                else:
+                    distinctive_features = f"Text: {text_str}"
         return {
             "success": True,
             "message": "AI analyzed the item photo successfully.",
@@ -118,6 +137,65 @@ async def analyze_image_preview(
         }
 
 
+@router.post("/extract-ocr", response_model=OCRPreviewResponse)
+async def extract_ocr_preview(
+    image: UploadFile = File(...),
+    current_user: AuthenticatedUser = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Extract visible text and writing (OCR) from an uploaded image."""
+    contents, content_type = await validate_and_read_image(image)
+    try:
+        ocr_provider = get_ocr_provider()
+        ocr_result = ocr_provider.extract_ocr_bytes(contents, content_type=content_type)
+        return {
+            "success": True,
+            "message": (
+                "Visible text extracted successfully."
+                if ocr_result.detected_text_present
+                else "No text detected in image."
+            ),
+            "detected_text_present": ocr_result.detected_text_present,
+            "extracted_text": ocr_result.extracted_text,
+            "sanitized_text": ocr_result.sanitized_text,
+            "text_blocks": ocr_result.text_blocks,
+            "confidence": ocr_result.confidence,
+            "language": ocr_result.language,
+            "has_sensitive_pii": ocr_result.has_sensitive_pii,
+            "provider": ocr_result.provider,
+            "status": ocr_result.status,
+        }
+    except OCRUnavailable as exc:
+        logger.info("OCR service unavailable: %s", exc)
+        return {
+            "success": False,
+            "message": "OCR service is not configured.",
+            "detected_text_present": False,
+            "extracted_text": "",
+            "sanitized_text": "",
+            "text_blocks": [],
+            "confidence": None,
+            "language": None,
+            "has_sensitive_pii": False,
+            "provider": "unavailable",
+            "status": "UNAVAILABLE",
+        }
+    except Exception as exc:
+        logger.warning("OCR preview extraction failed: %s", exc)
+        return {
+            "success": False,
+            "message": "OCR extraction failed or timed out.",
+            "detected_text_present": False,
+            "extracted_text": "",
+            "sanitized_text": "",
+            "text_blocks": [],
+            "confidence": None,
+            "language": None,
+            "has_sensitive_pii": False,
+            "provider": "unknown",
+            "status": "FAILED",
+        }
+
+
 @router.post("", response_model=FoundItemResponse, status_code=status.HTTP_201_CREATED)
 def create_found_item(
     found_item: FoundItemCreate,
@@ -137,8 +215,23 @@ def create_found_item(
         "ai_attributes_json": found_item.ai_attributes_json,
     }
     non_null_fields = {k: v for k, v in fields.items() if v is not None}
+    desc_text = found_item.description or found_item.item_name
+    if desc_text and desc_text.strip():
+        try:
+            emb_provider = get_embedding_provider()
+            emb_res = emb_provider.embed_text(desc_text)
+            if emb_res.status == "SUCCESS":
+                non_null_fields["image_embedding_blob"] = serialize_embedding(emb_res.vector)
+        except Exception as exc:
+            logger.warning("Failed to generate embedding on found item creation: %s", exc)
+
     item_id = repositories.create_found_item(user_id, **non_null_fields)
-    return serialize_found_item(found_item_or_404(user_id, item_id))
+    created_item = found_item_or_404(user_id, item_id)
+    try:
+        evaluate_and_persist_matches_for_found_item(created_item)
+    except Exception as exc:
+        logger.warning("Automatic match evaluation for found item %d failed: %s", item_id, exc)
+    return serialize_found_item(created_item)
 
 
 @router.get("", response_model=list[FoundItemResponse])
@@ -157,6 +250,59 @@ def get_my_found_item(
     return serialize_found_item(found_item_or_404(current_user_id(current_user), item_id))
 
 
+@router.patch("/{item_id}", response_model=FoundItemResponse)
+def update_my_found_item(
+    item_id: int,
+    report: FoundItemUpdate,
+    current_user: AuthenticatedUser = Depends(get_current_user),
+) -> dict[str, Any]:
+    user_id = current_user_id(current_user)
+    found_item_or_404(user_id, item_id)
+    fields = {
+        "found_at": report.found_date.isoformat() if report.found_date else None,
+        "location": report.found_location,
+        "campus": report.campus,
+        "item_name": report.item_name,
+        "category": report.category,
+        "color": report.color,
+        "brand": report.brand,
+        "description": report.description,
+        "distinctive_features": report.distinctive_features,
+        "ai_attributes_json": report.ai_attributes_json,
+    }
+    non_null_fields = {k: v for k, v in fields.items() if v is not None}
+
+    # If description or item_name was updated, regenerate embedding blob
+    desc_text = report.description or report.item_name
+    if desc_text and desc_text.strip():
+        try:
+            emb_provider = get_embedding_provider()
+            emb_res = emb_provider.embed_text(desc_text)
+            if emb_res.status == "SUCCESS":
+                non_null_fields["image_embedding_blob"] = serialize_embedding(emb_res.vector)
+        except Exception as exc:
+            logger.warning("Failed to regenerate embedding on found item update: %s", exc)
+
+    updated_item = repositories.update_found_item_for_user(user_id, item_id, non_null_fields)
+    if updated_item is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Found item not found.")
+    try:
+        evaluate_and_persist_matches_for_found_item(updated_item)
+    except Exception as exc:
+        logger.warning("Automatic match evaluation for updated found item %d failed: %s", item_id, exc)
+    return serialize_found_item(updated_item)
+
+
+@router.delete("/{item_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_my_found_item(
+    item_id: int,
+    current_user: AuthenticatedUser = Depends(get_current_user),
+) -> None:
+    user_id = current_user_id(current_user)
+    if not repositories.delete_found_item_for_user(user_id, item_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Found item not found.")
+
+
 @router.post("/{item_id}/image", response_model=FoundItemResponse)
 async def upload_found_item_image(
     item_id: int,
@@ -164,7 +310,7 @@ async def upload_found_item_image(
     current_user: AuthenticatedUser = Depends(get_current_user),
 ) -> dict[str, Any]:
     user_id = current_user_id(current_user)
-    found_item = found_item_or_404(user_id, item_id)
+    found_item_or_404(user_id, item_id)
     contents, content_type = await validate_and_read_image(image)
     try:
         stored_image = store_image(
@@ -243,7 +389,22 @@ def analyze_found_item(
             if isinstance(features_list, list) and features_list:
                 update_data["distinctive_features"] = ", ".join(str(f) for f in features_list)
 
+        # Generate image embedding blob from analyzed visual description
+        try:
+            emb_provider = get_embedding_provider()
+            desc_text = result.description or str(attrs.get("object_type", "Found item"))
+            emb_res = emb_provider.embed_text(desc_text)
+            if emb_res.status == "SUCCESS":
+                update_data["image_embedding_blob"] = serialize_embedding(emb_res.vector)
+        except Exception as exc:
+            logger.warning("Failed to generate image embedding for found item: %s", exc)
+
         updated_item = repositories.update_found_item_for_user(user_id, item_id, update_data)
+        if updated_item:
+            try:
+                evaluate_and_persist_matches_for_found_item(updated_item)
+            except Exception as exc:
+                logger.warning("Automatic match evaluation for analyzed found item %d failed: %s", item_id, exc)
         return {
             "found_item": serialize_found_item(updated_item),  # type: ignore[arg-type]
             "accepted": True,

@@ -8,13 +8,18 @@ from app.services.foundry_client import (
     FoundryServiceError,
     get_foundry_client,
 )
+from app.services.ocr_service import (
+    FoundryOCRProvider,
+    OCRProvider,
+    UnavailableOCRProvider,
+)
 from app.services.storage_service import get_image_bytes
 
 logger = logging.getLogger(__name__)
 
 
 class AnalysisUnavailable(Exception):
-    """Raised when no Phase 7 AI provider is configured."""
+    """Raised when no Phase 7/8 AI provider is configured."""
 
 
 class AnalysisFailed(Exception):
@@ -44,15 +49,47 @@ class ImageAnalysisProvider(Protocol):
 
 
 class FoundryImageAnalysisProvider:
-    def __init__(self, client: FoundryClient | None = None) -> None:
+    def __init__(
+        self,
+        client: FoundryClient | None = None,
+        ocr_provider: OCRProvider | None = None,
+    ) -> None:
         self.client = client or get_foundry_client()
+        self.ocr_provider = ocr_provider or FoundryOCRProvider(self.client)
 
     def analyze_bytes(self, image_bytes: bytes, content_type: str = "image/jpeg") -> AnalysisResult:
         try:
             vision_result = self.client.analyze_image(image_bytes, mime_type=content_type)
+            attributes = dict(vision_result.attributes)
+
+            # Extract structured OCR evidence if OCR provider is available
+            ocr_result_dict: dict[str, Any]
+            try:
+                ocr_result = self.ocr_provider.extract_ocr_bytes(image_bytes, content_type=content_type)
+                ocr_result_dict = ocr_result.to_dict()
+
+                # Merge sanitized OCR text into visible_text if OCR found details
+                if ocr_result.sanitized_text and not attributes.get("visible_text"):
+                    attributes["visible_text"] = ocr_result.text_blocks or [ocr_result.sanitized_text]
+            except Exception as ocr_exc:
+                logger.info("OCR extraction during image analysis omitted or failed: %s", ocr_exc)
+                ocr_result_dict = {
+                    "extracted_text": "",
+                    "sanitized_text": "",
+                    "text_blocks": [],
+                    "detected_text_present": False,
+                    "confidence": None,
+                    "language": None,
+                    "has_sensitive_pii": False,
+                    "provider": "unavailable",
+                    "status": "UNAVAILABLE",
+                }
+
+            attributes["ocr"] = ocr_result_dict
+
             return AnalysisResult(
                 description=vision_result.description,
-                attributes=vision_result.attributes,
+                attributes=attributes,
             )
         except FoundryConfigurationError as exc:
             raise AnalysisUnavailable("AI analysis is not configured.") from exc

@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any
 
 DEFAULT_DATABASE_PATH = Path(__file__).resolve().parents[2] / "data" / "profiles.db"
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 6
 
 
 def get_database_path() -> Path:
@@ -30,6 +30,8 @@ def _create_schema(connection: sqlite3.Connection) -> None:
             firebase_uid TEXT NOT NULL UNIQUE,
             status TEXT NOT NULL DEFAULT 'ACTIVE'
                 CHECK (status IN ('ACTIVE', 'SUSPENDED', 'CLOSED')),
+            role TEXT NOT NULL DEFAULT 'STUDENT'
+                CHECK (role IN ('STUDENT', 'ADMIN', 'STAFF')),
             created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
             updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
         );
@@ -64,6 +66,8 @@ def _create_schema(connection: sqlite3.Connection) -> None:
             description TEXT,
             distinctive_features TEXT,
             image_reference TEXT,
+            description_embedding_blob TEXT,
+            image_embedding_blob TEXT,
             created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
             updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE RESTRICT
@@ -85,6 +89,7 @@ def _create_schema(connection: sqlite3.Connection) -> None:
             distinctive_features TEXT,
             image_reference TEXT,
             ai_attributes_json TEXT,
+            image_embedding_blob TEXT,
             analysis_status TEXT NOT NULL DEFAULT 'NOT_REQUESTED'
                 CHECK (analysis_status IN ('NOT_REQUESTED', 'QUEUED', 'ANALYZED', 'UNAVAILABLE', 'FAILED')),
             analysis_error TEXT,
@@ -162,56 +167,107 @@ def initialize_database() -> None:
         current_version = connection.execute("PRAGMA user_version").fetchone()[0]
         if current_version > SCHEMA_VERSION:
             raise RuntimeError("Database schema version is newer than this application.")
+
         _create_schema(connection)
-        if current_version < 2:
-            columns = {
-                row[1]
-                for row in connection.execute("PRAGMA table_info(lost_items)")
-            }
-            for column, definition in (
-                ("color", "TEXT"),
-                ("brand", "TEXT"),
-                ("distinctive_features", "TEXT"),
-                ("image_reference", "TEXT"),
-            ):
-                if column not in columns:
+
+        # Idempotent column migrations for lost_items
+        lost_columns = {
+            row[1]
+            for row in connection.execute("PRAGMA table_info(lost_items)")
+        }
+        for column, definition in (
+            ("color", "TEXT"),
+            ("brand", "TEXT"),
+            ("distinctive_features", "TEXT"),
+            ("image_reference", "TEXT"),
+            ("description_embedding_blob", "TEXT"),
+            ("image_embedding_blob", "TEXT"),
+        ):
+            if column not in lost_columns:
+                connection.execute(
+                    f"ALTER TABLE lost_items ADD COLUMN {column} {definition}"
+                )
+
+        # Idempotent column migrations for found_items
+        found_columns = {
+            row[1]
+            for row in connection.execute("PRAGMA table_info(found_items)")
+        }
+        for column, definition in (
+            ("analysis_status", "TEXT NOT NULL DEFAULT 'NOT_REQUESTED'"),
+            ("analysis_error", "TEXT"),
+            ("analysis_requested_at", "TEXT"),
+            ("analysis_completed_at", "TEXT"),
+            ("item_name", "TEXT"),
+            ("category", "TEXT"),
+            ("color", "TEXT"),
+            ("brand", "TEXT"),
+            ("description", "TEXT"),
+            ("distinctive_features", "TEXT"),
+            ("ai_attributes_json", "TEXT"),
+            ("image_embedding_blob", "TEXT"),
+        ):
+            if column not in found_columns:
+                connection.execute(
+                    f"ALTER TABLE found_items ADD COLUMN {column} {definition}"
+                )
+
+        # Idempotent column migrations for users
+        user_columns = {
+            row[1]
+            for row in connection.execute("PRAGMA table_info(users)")
+        }
+        if "role" not in user_columns:
+            connection.execute(
+                "ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'STUDENT'"
+            )
+        if "status" not in user_columns:
+            connection.execute(
+                "ALTER TABLE users ADD COLUMN status TEXT NOT NULL DEFAULT 'ACTIVE'"
+            )
+
+        # Backfill default values for existing user rows
+        connection.execute(
+            "UPDATE users SET role = 'STUDENT' WHERE role IS NULL OR role = ''"
+        )
+        connection.execute(
+            "UPDATE users SET status = 'ACTIVE' WHERE status IS NULL OR status = ''"
+        )
+
+        # Backfill missing embeddings for existing lost and found reports with text
+        try:
+            from app.services.embedding_service import (
+                generate_semantic_feature_vector,
+                serialize_embedding,
+            )
+            lost_rows = connection.execute(
+                "SELECT id, item_name, description FROM lost_items WHERE description_embedding_blob IS NULL"
+            ).fetchall()
+            for r in lost_rows:
+                txt = r["description"] or r["item_name"]
+                if txt and str(txt).strip():
+                    vec = generate_semantic_feature_vector(str(txt).strip())
                     connection.execute(
-                        f"ALTER TABLE lost_items ADD COLUMN {column} {definition}"
+                        "UPDATE lost_items SET description_embedding_blob = ? WHERE id = ?",
+                        (serialize_embedding(vec), r["id"]),
                     )
-        if current_version < 3:
-            columns = {
-                row[1]
-                for row in connection.execute("PRAGMA table_info(found_items)")
-            }
-            for column, definition in (
-                ("analysis_status", "TEXT NOT NULL DEFAULT 'NOT_REQUESTED'"),
-                ("analysis_error", "TEXT"),
-                ("analysis_requested_at", "TEXT"),
-                ("analysis_completed_at", "TEXT"),
-            ):
-                if column not in columns:
+
+            found_rows = connection.execute(
+                "SELECT id, item_name, description FROM found_items WHERE image_embedding_blob IS NULL"
+            ).fetchall()
+            for r in found_rows:
+                txt = r["description"] or r["item_name"]
+                if txt and str(txt).strip():
+                    vec = generate_semantic_feature_vector(str(txt).strip())
                     connection.execute(
-                        f"ALTER TABLE found_items ADD COLUMN {column} {definition}"
+                        "UPDATE found_items SET image_embedding_blob = ? WHERE id = ?",
+                        (serialize_embedding(vec), r["id"]),
                     )
-        if current_version < SCHEMA_VERSION:
-            columns = {
-                row[1]
-                for row in connection.execute("PRAGMA table_info(found_items)")
-            }
-            for column, definition in (
-                ("item_name", "TEXT"),
-                ("category", "TEXT"),
-                ("color", "TEXT"),
-                ("brand", "TEXT"),
-                ("description", "TEXT"),
-                ("distinctive_features", "TEXT"),
-                ("ai_attributes_json", "TEXT"),
-            ):
-                if column not in columns:
-                    connection.execute(
-                        f"ALTER TABLE found_items ADD COLUMN {column} {definition}"
-                    )
-            connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+        except Exception:
+            pass
+
+        connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+
 
 
 
@@ -271,11 +327,11 @@ def update_profile(firebase_uid: str, profile: dict[str, object]) -> dict[str, o
     return get_profile(firebase_uid)
 
 
-def ensure_user(firebase_uid: str) -> int:
+def ensure_user(firebase_uid: str, role: str = "STUDENT") -> int:
     with get_connection() as connection:
         connection.execute(
-            "INSERT OR IGNORE INTO users (firebase_uid) VALUES (?)",
-            (firebase_uid,),
+            "INSERT OR IGNORE INTO users (firebase_uid, role) VALUES (?, ?)",
+            (firebase_uid, role),
         )
         row = connection.execute(
             "SELECT id FROM users WHERE firebase_uid = ?",
@@ -293,6 +349,47 @@ def get_user_id(firebase_uid: str) -> int | None:
             (firebase_uid,),
         ).fetchone()
     return int(row[0]) if row else None
+
+
+def get_user_record(user_id: int) -> dict[str, Any] | None:
+    with get_connection() as connection:
+        row = connection.execute(
+            "SELECT id, firebase_uid, status, role, created_at, updated_at FROM users WHERE id = ?",
+            (user_id,),
+        ).fetchone()
+        return dict(row) if row else None
+
+
+def get_user_by_firebase_uid(firebase_uid: str) -> dict[str, Any] | None:
+    with get_connection() as connection:
+        row = connection.execute(
+            "SELECT id, firebase_uid, status, role, created_at, updated_at FROM users WHERE firebase_uid = ?",
+            (firebase_uid,),
+        ).fetchone()
+        return dict(row) if row else None
+
+
+def update_user_status(user_id: int, status: str) -> dict[str, Any] | None:
+    if status not in ("ACTIVE", "SUSPENDED", "CLOSED"):
+        raise ValueError(f"Invalid user status: {status}")
+    with get_connection() as connection:
+        connection.execute(
+            "UPDATE users SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+            (status, user_id),
+        )
+    return get_user_record(user_id)
+
+
+def update_user_role(user_id: int, role: str) -> dict[str, Any] | None:
+    if role not in ("STUDENT", "ADMIN", "STAFF"):
+        raise ValueError(f"Invalid user role: {role}")
+    with get_connection() as connection:
+        connection.execute(
+            "UPDATE users SET role = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+            (role, user_id),
+        )
+    return get_user_record(user_id)
+
 
 
 def insert_record(table: str, values: dict[str, Any]) -> int:

@@ -5,7 +5,11 @@ import { useAuth } from "./auth/AuthContext";
 import { LostItemForm } from "./components/LostItemForm";
 import { FoundItemForm } from "./components/FoundItemForm";
 import { ProfileForm } from "./components/ProfileForm";
+import { MatchResultsView } from "./components/MatchResultsView";
 import { Dashboard, type DashboardView } from "./components/Dashboard";
+import { AdminDashboard } from "./components/AdminDashboard";
+import { ManualSearchBrowse } from "./components/ManualSearchBrowse";
+import type { FoundItem, LostItem } from "./services/api";
 
 type FirebaseAuthError = {
   code?: string;
@@ -179,25 +183,57 @@ function AuthForm() {
 function ProtectedPage() {
   const { user } = useAuth();
   const [view, setView] = useState<DashboardView>("dashboard");
+  const [selectedFoundItem, setSelectedFoundItem] = useState<FoundItem | null>(null);
+  const [selectedLostItem, setSelectedLostItem] = useState<LostItem | null>(null);
 
   if (view === "dashboard") {
-    return <Dashboard userEmail={user?.email ?? undefined} onNavigate={setView} />;
+    return (
+      <Dashboard
+        userEmail={user?.email ?? undefined}
+        onNavigate={setView}
+        onSelectFoundItemForMatches={(item) => {
+          setSelectedFoundItem(item);
+          setSelectedLostItem(null);
+        }}
+        onSelectLostItemForMatches={(item) => {
+          setSelectedLostItem(item);
+          setSelectedFoundItem(null);
+        }}
+      />
+    );
   }
 
   return (
     <section className="welcome-panel" aria-labelledby="protected-title">
-      <div className="button-row page-nav">
-        <button
-          className="secondary-button"
-          onClick={() => setView("dashboard")}
-          type="button"
-        >
-          ← Back to dashboard
-        </button>
-      </div>
+      {view !== "matches" && view !== "admin" && view !== "search" && (
+        <div className="button-row page-nav">
+          <button
+            className="secondary-button"
+            onClick={() => setView("dashboard")}
+            type="button"
+          >
+            ← Back to dashboard
+          </button>
+        </div>
+      )}
       {view === "profile" && <ProfileForm />}
       {view === "lost" && <LostItemForm />}
       {view === "found" && <FoundItemForm />}
+      {view === "admin" && <AdminDashboard onBack={() => setView("dashboard")} />}
+      {view === "search" && (
+        <ManualSearchBrowse
+          onBack={() => setView("dashboard")}
+          onNavigateToLostReport={() => setView("lost")}
+          onNavigateToFoundReport={() => setView("found")}
+        />
+      )}
+      {view === "matches" && (selectedFoundItem || selectedLostItem) && (
+        <MatchResultsView
+          foundItem={selectedFoundItem}
+          lostItem={selectedLostItem}
+          onBack={() => setView("dashboard")}
+        />
+      )}
     </section>
   );
 }

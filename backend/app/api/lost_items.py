@@ -1,3 +1,5 @@
+import logging
+
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 
 from app.auth.firebase import AuthenticatedUser, get_current_user
@@ -7,7 +9,11 @@ from app.database.lost_item_schemas import (
     LostItemResponse,
     LostItemUpdate,
 )
+from app.services.embedding_service import get_embedding_provider, serialize_embedding
+from app.services.matching_service import evaluate_and_persist_matches_for_lost_item
 from app.services.storage_service import store_image, validate_and_read_image
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/lost-items", tags=["lost-items"])
 
@@ -20,6 +26,7 @@ def serialize_lost_item(item: dict[str, object]) -> dict[str, object]:
         "category": item["category"],
         "color": item["color"],
         "brand": item["brand"],
+        "campus": item.get("campus"),
         "lost_date": item["lost_at"],
         "approximate_location": item["location"],
         "description": item["description"],
@@ -36,7 +43,8 @@ def profile_fields_to_database(fields: dict[str, object]) -> dict[str, object]:
         "category": fields["category"],
         "color": fields["color"],
         "brand": fields["brand"],
-        "lost_at": fields["lost_date"].isoformat(),  # type: ignore[union-attr]
+        "campus": fields.get("campus"),
+        "lost_at": fields["lost_date"].isoformat() if hasattr(fields["lost_date"], "isoformat") else fields["lost_date"],
         "location": fields["approximate_location"],
         "description": fields["description"],
         "distinctive_features": fields["distinctive_features"],
@@ -54,11 +62,26 @@ def create_lost_item(
     current_user: AuthenticatedUser = Depends(get_current_user),
 ) -> dict[str, object]:
     user_id = current_user_id(current_user)
-    item_id = repositories.create_lost_item(
-        user_id,
-        **profile_fields_to_database(report.model_dump()),
-    )
+    db_fields = profile_fields_to_database(report.model_dump())
+
+    # Generate description embedding if description text is present
+    desc_text = report.description or report.item_name
+    if desc_text and desc_text.strip():
+        try:
+            provider = get_embedding_provider()
+            emb_res = provider.embed_text(desc_text)
+            if emb_res.status == "SUCCESS":
+                db_fields["description_embedding_blob"] = serialize_embedding(emb_res.vector)
+        except Exception as exc:
+            logger.warning("Failed to generate description embedding for lost item: %s", exc)
+
+    item_id = repositories.create_lost_item(user_id, **db_fields)
     item = repositories.get_lost_item_for_user(user_id, item_id)
+    if item:
+        try:
+            evaluate_and_persist_matches_for_lost_item(item)
+        except Exception as exc:
+            logger.warning("Automatic match evaluation for lost item %d failed: %s", item_id, exc)
     return serialize_lost_item(item)  # type: ignore[arg-type]
 
 
@@ -88,13 +111,27 @@ def update_my_lost_item(
     current_user: AuthenticatedUser = Depends(get_current_user),
 ) -> dict[str, object]:
     user_id = current_user_id(current_user)
+    db_fields = profile_fields_to_database(report.model_dump())
+    desc_text = report.description or report.item_name
+    if desc_text and desc_text.strip():
+        try:
+            provider = get_embedding_provider()
+            emb_res = provider.embed_text(desc_text)
+            if emb_res.status == "SUCCESS":
+                db_fields["description_embedding_blob"] = serialize_embedding(emb_res.vector)
+        except Exception as exc:
+            logger.warning("Failed to regenerate description embedding on lost item update: %s", exc)
     item = repositories.update_lost_item_for_user(
         user_id,
         item_id,
-        profile_fields_to_database(report.model_dump()),
+        db_fields,
     )
     if item is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Lost item not found.")
+    try:
+        evaluate_and_persist_matches_for_lost_item(item)
+    except Exception as exc:
+        logger.warning("Automatic match evaluation for updated lost item %d failed: %s", item_id, exc)
     return serialize_lost_item(item)
 
 
@@ -122,6 +159,7 @@ async def upload_lost_item_image(
     try:
         stored_image = store_image(contents, content_type, current_user.uid, item_id)
     except Exception as exc:
+        logger.exception("Failed to store lost-item image for item_id=%d: %s", item_id, exc)
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Image storage is temporarily unavailable.",

@@ -1,11 +1,14 @@
-import { useState, type ChangeEvent, type FormEvent } from "react";
+import { useEffect, useState, type ChangeEvent, type FormEvent } from "react";
 
 import { useAuth } from "../auth/AuthContext";
 import {
   ApiError,
   analyzeItemImage,
   createFoundItem,
+  deleteFoundItem,
+  getMyFoundItems,
   triggerFoundItemAnalysis,
+  updateFoundItem,
   uploadFoundItemImage,
   type FoundItem,
   type FoundItemInput,
@@ -18,6 +21,9 @@ type FoundItemFormProps = {
 
 export function FoundItemForm({ onBack }: FoundItemFormProps = {}) {
   const { user } = useAuth();
+  const [reports, setReports] = useState<FoundItem[]>([]);
+  const [editingId, setEditingId] = useState<number | undefined>();
+
   const [foundDate, setFoundDate] = useState("");
   const [foundLocation, setFoundLocation] = useState("");
   const [campus, setCampus] = useState("");
@@ -35,9 +41,65 @@ export function FoundItemForm({ onBack }: FoundItemFormProps = {}) {
   const [aiUnavailable, setAiUnavailable] = useState(false);
 
   const [foundItem, setFoundItem] = useState<FoundItem | null>(null);
+  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+
+  async function loadReports() {
+    if (!user) return;
+    const token = await user.getIdToken();
+    setReports(await getMyFoundItems(token));
+  }
+
+  useEffect(() => {
+    let active = true;
+    void loadReports()
+      .catch(() => {
+        if (active) setError("Your found reports could not be loaded.");
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [user]);
+
+  function resetForm() {
+    setEditingId(undefined);
+    setFoundDate("");
+    setFoundLocation("");
+    setCampus("");
+    setDescription("");
+    setItemName("");
+    setCategory("");
+    setColor("");
+    setBrand("");
+    setDistinctiveFeatures("");
+    setAiAttributesJson(null);
+    setImage(null);
+    setAiStatusMessage(null);
+  }
+
+  function editReport(report: FoundItem) {
+    setEditingId(report.id);
+    setFoundDate(report.found_date);
+    setFoundLocation(report.found_location || "");
+    setCampus(report.campus || "");
+    setDescription(report.description || "");
+    setItemName(report.item_name || "");
+    setCategory(report.category || "");
+    setColor(report.color || "");
+    setBrand(report.brand || "");
+    setDistinctiveFeatures(report.distinctive_features || "");
+    setAiAttributesJson(
+      report.ai_attributes ? JSON.stringify(report.ai_attributes) : null,
+    );
+    setImage(null);
+    setError(null);
+    setMessage(null);
+  }
 
   async function handleImageSelect(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0] ?? null;
@@ -74,14 +136,21 @@ export function FoundItemForm({ onBack }: FoundItemFormProps = {}) {
         if (analysis.attributes) {
           setAiAttributesJson(JSON.stringify(analysis.attributes));
         }
-        setAiStatusMessage("AI analyzed the photo. You can edit any details below before submitting.");
+        setAiStatusMessage(
+          "AI analyzed the photo. You can edit any details below before submitting.",
+        );
         setAiUnavailable(false);
       } else {
-        setAiStatusMessage(analysis.message || "AI analysis is unavailable; you can fill details manually.");
+        setAiStatusMessage(
+          analysis.message ||
+            "AI analysis is unavailable; you can fill details manually.",
+        );
         setAiUnavailable(true);
       }
     } catch {
-      setAiStatusMessage("AI analysis timed out or could not be completed; you can enter details manually.");
+      setAiStatusMessage(
+        "AI analysis timed out or could not be completed; you can enter details manually.",
+      );
       setAiUnavailable(true);
     } finally {
       setAnalyzingImage(false);
@@ -108,49 +177,93 @@ export function FoundItemForm({ onBack }: FoundItemFormProps = {}) {
         ai_attributes_json: aiAttributesJson || null,
       };
 
-      const created = await createFoundItem(token, payload);
-      let stored = created;
-      if (image) {
-        stored = await uploadFoundItemImage(token, created.id, image);
-      }
-      setFoundItem(stored);
-
-      if (stored.image_reference && !stored.description) {
-        try {
-          const analysis = await triggerFoundItemAnalysis(token, stored.id);
-          setFoundItem(analysis.found_item);
-          setMessage(analysis.message);
-        } catch {
-          setMessage("Found item reported successfully. (AI post-analysis unavailable).");
+      if (editingId) {
+        let updated = await updateFoundItem(token, editingId, payload);
+        if (image) {
+          updated = await uploadFoundItemImage(token, editingId, image);
         }
+        setFoundItem(updated);
+        await loadReports();
+        resetForm();
+        setMessage("Found report updated.");
       } else {
-        setMessage("Found item reported successfully.");
+        const created = await createFoundItem(token, payload);
+        let stored = created;
+        if (image) {
+          stored = await uploadFoundItemImage(token, created.id, image);
+        }
+        setFoundItem(stored);
+
+        if (stored.image_reference && !stored.description) {
+          try {
+            const analysis = await triggerFoundItemAnalysis(token, stored.id);
+            setFoundItem(analysis.found_item);
+            setMessage(analysis.message);
+          } catch {
+            setMessage(
+              "Found item reported successfully. (AI post-analysis unavailable).",
+            );
+          }
+        } else {
+          setMessage("Found item reported successfully.");
+        }
+        await loadReports();
+        resetForm();
       }
     } catch (submitError) {
       setError(
         submitError instanceof ApiError
           ? submitError.message
-          : "The found item could not be reported. Check the details and image.",
+          : "The found item could not be saved. Check the details and try again.",
       );
     } finally {
       setSaving(false);
     }
   }
 
+  async function handleDelete(itemId: number) {
+    if (!window.confirm("Are you sure you want to delete this found report?")) {
+      return;
+    }
+    setError(null);
+    try {
+      const token = await user!.getIdToken();
+      await deleteFoundItem(token, itemId);
+      await loadReports();
+      if (editingId === itemId) {
+        resetForm();
+      }
+      setMessage("Found report deleted.");
+    } catch (deleteError) {
+      setError(
+        deleteError instanceof ApiError
+          ? deleteError.message
+          : "The found report could not be deleted.",
+      );
+    }
+  }
+
+  if (loading) {
+    return <p role="status">Loading found reports...</p>;
+  }
+
   return (
     <section className="profile-panel" aria-labelledby="found-items-title">
       <p className="eyebrow">Found items</p>
-      <h2 id="found-items-title">Report an item you found</h2>
+      <h2 id="found-items-title">
+        {editingId ? "Edit found item report" : "Report an item you found"}
+      </h2>
       <p className="profile-note">
-        Upload a photo of the found item. AI will analyze the image and auto-fill details, which you can edit before submitting.
+        Upload a photo of the found item. AI will analyze the image and auto-fill
+        details, which you can edit before submitting.
       </p>
       <form className="profile-form" onSubmit={handleSubmit}>
         <label>
-          Found-item photo
+          Found-item photo {editingId && "(Optional to replace)"}
           <input
             accept="image/jpeg,image/png,image/webp"
             onChange={handleImageSelect}
-            required
+            required={!editingId}
             type="file"
           />
         </label>
@@ -160,7 +273,10 @@ export function FoundItemForm({ onBack }: FoundItemFormProps = {}) {
           </p>
         )}
         {aiStatusMessage && (
-          <p className={`ai-status-note ${aiUnavailable ? "unavailable" : ""}`} role="status">
+          <p
+            className={`ai-status-note ${aiUnavailable ? "unavailable" : ""}`}
+            role="status"
+          >
             {aiStatusMessage}
           </p>
         )}
@@ -255,8 +371,16 @@ export function FoundItemForm({ onBack }: FoundItemFormProps = {}) {
           />
         </label>
 
-        {error && <p className="error-message" role="alert">{error}</p>}
-        {message && <p className="success-message" role="status">{message}</p>}
+        {error && (
+          <p className="error-message" role="alert">
+            {error}
+          </p>
+        )}
+        {message && (
+          <p className="success-message" role="status">
+            {message}
+          </p>
+        )}
 
         <div className="button-row">
           {onBack && (
@@ -264,9 +388,26 @@ export function FoundItemForm({ onBack }: FoundItemFormProps = {}) {
               ← Back
             </button>
           )}
-          <button className="primary-button" disabled={saving || analyzingImage} type="submit">
-            {saving ? "Reporting..." : "Report found item"}
+          <button
+            className="primary-button"
+            disabled={saving || analyzingImage}
+            type="submit"
+          >
+            {saving
+              ? "Saving..."
+              : editingId
+                ? "Update report"
+                : "Report found item"}
           </button>
+          {editingId && (
+            <button
+              className="secondary-button"
+              onClick={resetForm}
+              type="button"
+            >
+              Cancel edit
+            </button>
+          )}
         </div>
       </form>
 
@@ -274,9 +415,49 @@ export function FoundItemForm({ onBack }: FoundItemFormProps = {}) {
         <div className="identity-panel" role="status">
           <strong>Report status: {foundItem.status}</strong>
           <span>Analysis status: {foundItem.analysis_status}</span>
-          {foundItem.description && <span>Description: {foundItem.description}</span>}
+          {foundItem.description && (
+            <span>Description: {foundItem.description}</span>
+          )}
         </div>
       )}
+
+      <div className="report-list" aria-label="Your found reports">
+        <h3>Your found reports</h3>
+        {reports.length === 0 && (
+          <p className="profile-note">No found reports yet.</p>
+        )}
+        {reports.map((report) => (
+          <article className="report-row" key={report.id}>
+            <div>
+              <strong>
+                {report.item_name || report.category || "Found item"}
+              </strong>
+              <span>
+                {report.category || "Uncategorized"} · {report.status}
+              </span>
+              <span>
+                {report.found_location || report.campus || report.found_date}
+              </span>
+            </div>
+            <div className="button-row">
+              <button
+                className="secondary-button"
+                onClick={() => editReport(report)}
+                type="button"
+              >
+                Edit
+              </button>
+              <button
+                className="secondary-button"
+                onClick={() => void handleDelete(report.id)}
+                type="button"
+              >
+                Delete
+              </button>
+            </div>
+          </article>
+        ))}
+      </div>
     </section>
   );
 }

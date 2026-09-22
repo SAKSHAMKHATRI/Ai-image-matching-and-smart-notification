@@ -56,9 +56,14 @@ def _load_service_account_file(path: str) -> dict[str, str]:
 
     The file path is never logged and its contents are never printed.
     """
+    candidate = os.path.expanduser(path)
+    if not os.path.exists(candidate) and not os.path.isabs(path):
+        alt_path = os.path.join("backend", path)
+        if os.path.exists(alt_path):
+            candidate = alt_path
 
     try:
-        with open(os.path.expanduser(path), encoding="utf-8") as handle:
+        with open(candidate, encoding="utf-8") as handle:
             service_account = json.load(handle)
     except FileNotFoundError as exc:
         raise FirebaseConfigError(
@@ -76,7 +81,6 @@ def _load_service_account_file(path: str) -> dict[str, str]:
 
 
 @lru_cache
-
 def get_firebase_options() -> dict[str, str]:
     # Preferred: path to a local service-account JSON file (gitignored).
     service_account_path = os.getenv("FIREBASE_SERVICE_ACCOUNT_PATH")
@@ -113,6 +117,15 @@ def get_firebase_options() -> dict[str, str]:
 
 def get_storage_bucket_name() -> str:
     bucket_name = os.getenv("FIREBASE_STORAGE_BUCKET")
-    if not bucket_name or bucket_name.startswith("replace-with-"):
-        raise FirebaseConfigError("Firebase Storage bucket is not configured.")
-    return bucket_name
+    if bucket_name and not bucket_name.startswith("replace-with-"):
+        return bucket_name.strip()
+
+    try:
+        options = get_firebase_options()
+        project_id = options.get("projectId")
+        if project_id and isinstance(project_id, str) and project_id.strip():
+            return f"{project_id.strip()}.appspot.com"
+    except Exception:
+        pass
+
+    raise FirebaseConfigError("Firebase Storage bucket is not configured.")

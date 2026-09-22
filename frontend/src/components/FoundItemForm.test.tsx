@@ -6,7 +6,10 @@ import { useAuth } from "../auth/AuthContext";
 import {
   analyzeItemImage,
   createFoundItem,
+  deleteFoundItem,
+  getMyFoundItems,
   triggerFoundItemAnalysis,
+  updateFoundItem,
   uploadFoundItemImage,
 } from "../services/api";
 
@@ -17,14 +20,20 @@ vi.mock("../auth/AuthContext", () => ({
 vi.mock("../services/api", () => ({
   analyzeItemImage: vi.fn(),
   createFoundItem: vi.fn(),
+  deleteFoundItem: vi.fn(),
+  getMyFoundItems: vi.fn(),
   triggerFoundItemAnalysis: vi.fn(),
+  updateFoundItem: vi.fn(),
   uploadFoundItemImage: vi.fn(),
 }));
 
 const mockedUseAuth = vi.mocked(useAuth);
 const mockedAnalyzeImage = vi.mocked(analyzeItemImage);
 const mockedCreateFoundItem = vi.mocked(createFoundItem);
+const mockedDeleteFoundItem = vi.mocked(deleteFoundItem);
+const mockedGetMyFoundItems = vi.mocked(getMyFoundItems);
 const mockedTriggerAnalysis = vi.mocked(triggerFoundItemAnalysis);
+const mockedUpdateFoundItem = vi.mocked(updateFoundItem);
 const mockedUploadImage = vi.mocked(uploadFoundItemImage);
 const mockedUser = { getIdToken: vi.fn().mockResolvedValue("verified-token") };
 const foundItem = {
@@ -60,6 +69,7 @@ describe("FoundItemForm", () => {
       logInWithGoogle: vi.fn(),
       logOut: vi.fn(),
     });
+    mockedGetMyFoundItems.mockResolvedValue([]);
   });
 
   it("reports a found item with manual inputs and uploads its photo", async () => {
@@ -71,15 +81,16 @@ describe("FoundItemForm", () => {
     mockedUploadImage.mockResolvedValue(foundItem);
 
     render(<FoundItemForm />);
-    fireEvent.change(screen.getByLabelText("Found date"), { target: { value: "2026-09-19" } });
-    fireEvent.change(screen.getByLabelText("Found location"), { target: { value: "Library" } });
-    fireEvent.change(screen.getByLabelText("Campus"), { target: { value: "North Campus" } });
-    fireEvent.change(screen.getByLabelText("Description"), {
+    await screen.findByRole("heading", { name: /Report an item you found/i });
+    fireEvent.change(screen.getByLabelText(/Found date/i), { target: { value: "2026-09-19" } });
+    fireEvent.change(screen.getByLabelText(/Found location/i), { target: { value: "Library" } });
+    fireEvent.change(screen.getByLabelText(/Campus/i), { target: { value: "North Campus" } });
+    fireEvent.change(screen.getByLabelText(/Description/i), {
       target: { value: "Black water bottle found on table" },
     });
 
     const image = new File(["image"], "found.png", { type: "image/png" });
-    fireEvent.change(screen.getByLabelText("Found-item photo"), { target: { files: [image] } });
+    fireEvent.change(screen.getByLabelText(/Found-item photo/i), { target: { files: [image] } });
 
     await waitFor(() => expect(mockedAnalyzeImage).toHaveBeenCalled());
 
@@ -112,30 +123,31 @@ describe("FoundItemForm", () => {
     mockedUploadImage.mockResolvedValue(foundItem);
 
     render(<FoundItemForm />);
+    await screen.findByRole("heading", { name: /Report an item you found/i });
     const image = new File(["image"], "found.png", { type: "image/png" });
-    fireEvent.change(screen.getByLabelText("Found-item photo"), { target: { files: [image] } });
+    fireEvent.change(screen.getByLabelText(/Found-item photo/i), { target: { files: [image] } });
 
     await waitFor(() => {
       expect(
-        (screen.getByLabelText("Description") as HTMLTextAreaElement).value,
+        (screen.getByLabelText(/Description/i) as HTMLTextAreaElement).value,
       ).toBe("AI-generated description of black water bottle.");
     });
-    expect((screen.getByLabelText("Item name / object type") as HTMLInputElement).value).toBe("water bottle");
-    expect((screen.getByLabelText("Category") as HTMLInputElement).value).toBe("Personal Items");
-    expect((screen.getByLabelText("Primary color") as HTMLInputElement).value).toBe("black");
-    expect((screen.getByLabelText("Brand (if visible)") as HTMLInputElement).value).toBe("Hydro Flask");
-    expect((screen.getByLabelText("Distinctive features / visible text") as HTMLTextAreaElement).value).toBe("stickers on side");
+    expect((screen.getByLabelText(/Item name/i) as HTMLInputElement).value).toBe("water bottle");
+    expect((screen.getByLabelText(/Category/i) as HTMLInputElement).value).toBe("Personal Items");
+    expect((screen.getByLabelText(/Primary color/i) as HTMLInputElement).value).toBe("black");
+    expect((screen.getByLabelText(/Brand/i) as HTMLInputElement).value).toBe("Hydro Flask");
+    expect((screen.getByLabelText(/Distinctive features/i) as HTMLTextAreaElement).value).toBe("stickers on side");
     expect(screen.getByText(/AI analyzed the photo/)).toBeVisible();
 
     // User edits the description before submitting
-    fireEvent.change(screen.getByLabelText("Description"), {
+    fireEvent.change(screen.getByLabelText(/Description/i), {
       target: { value: "Edited user description for water bottle." },
     });
-    expect((screen.getByLabelText("Description") as HTMLTextAreaElement).value).toBe(
+    expect((screen.getByLabelText(/Description/i) as HTMLTextAreaElement).value).toBe(
       "Edited user description for water bottle.",
     );
 
-    fireEvent.change(screen.getByLabelText("Found date"), { target: { value: "2026-09-19" } });
+    fireEvent.change(screen.getByLabelText(/Found date/i), { target: { value: "2026-09-19" } });
     const form = screen.getByRole("button", { name: "Report found item" }).closest("form")!;
     fireEvent.submit(form);
 
@@ -149,5 +161,64 @@ describe("FoundItemForm", () => {
       brand: "Hydro Flask",
       found_date: "2026-09-19",
     });
+  });
+
+  it("loads user's found reports and enables editing a found report", async () => {
+    mockedGetMyFoundItems.mockResolvedValue([foundItem]);
+    mockedUpdateFoundItem.mockResolvedValue({ ...foundItem, description: "Updated bottle desc" });
+
+    render(<FoundItemForm />);
+
+    expect(await screen.findByText("water bottle")).toBeVisible();
+    expect(screen.getByText("Personal Items · REPORTED")).toBeVisible();
+
+    // Click Edit button
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+
+    expect((screen.getByLabelText(/Description/i) as HTMLTextAreaElement).value).toBe(
+      "Black matte stainless steel water bottle.",
+    );
+    expect((screen.getByLabelText(/Found location/i) as HTMLInputElement).value).toBe("Library");
+
+    fireEvent.change(screen.getByLabelText(/Description/i), {
+      target: { value: "Updated bottle desc" },
+    });
+
+    const updateBtn = screen.getByRole("button", { name: "Update report" });
+    fireEvent.click(updateBtn);
+
+    await waitFor(() => expect(mockedUpdateFoundItem).toHaveBeenCalled());
+    expect(mockedUpdateFoundItem).toHaveBeenCalledWith(
+      "verified-token",
+      foundItem.id,
+      expect.objectContaining({ description: "Updated bottle desc" }),
+    );
+  });
+
+  it("deletes a found report when user confirms deletion", async () => {
+    mockedGetMyFoundItems.mockResolvedValue([foundItem]);
+    mockedDeleteFoundItem.mockResolvedValue();
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+
+    render(<FoundItemForm />);
+
+    expect(await screen.findByText("water bottle")).toBeVisible();
+
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+
+    await waitFor(() => expect(mockedDeleteFoundItem).toHaveBeenCalledWith("verified-token", foundItem.id));
+  });
+
+  it("cancels deletion when user declines confirmation", async () => {
+    mockedGetMyFoundItems.mockResolvedValue([foundItem]);
+    vi.spyOn(window, "confirm").mockReturnValue(false);
+
+    render(<FoundItemForm />);
+
+    expect(await screen.findByText("water bottle")).toBeVisible();
+
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+
+    expect(mockedDeleteFoundItem).not.toHaveBeenCalled();
   });
 });
