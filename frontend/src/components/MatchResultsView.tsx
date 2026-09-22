@@ -14,12 +14,13 @@ import {
 type MatchResultsViewProps = {
   foundItem?: FoundItem | null;
   lostItem?: LostItem | null;
+  lostItemId?: number | null;
   onBack: () => void;
 };
 
 type FilterCategory = "all" | "strong" | "possible" | "low";
 
-export function MatchResultsView({ foundItem, lostItem, onBack }: MatchResultsViewProps) {
+export function MatchResultsView({ foundItem, lostItem, lostItemId, onBack }: MatchResultsViewProps) {
   const { user } = useAuth();
   const [data, setData] = useState<MatchSearchResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -28,7 +29,8 @@ export function MatchResultsView({ foundItem, lostItem, onBack }: MatchResultsVi
   const [filter, setFilter] = useState<FilterCategory>("all");
   const [selectedMatch, setSelectedMatch] = useState<ScoredMatchItem | null>(null);
 
-  const isLostView = Boolean(lostItem);
+  const targetLostId = lostItem?.id ?? lostItemId ?? null;
+  const isLostView = Boolean(targetLostId);
 
   async function loadMatches(refresh = false) {
     if (!user) return;
@@ -38,8 +40,8 @@ export function MatchResultsView({ foundItem, lostItem, onBack }: MatchResultsVi
 
     try {
       const token = await user.getIdToken();
-      if (isLostView && lostItem) {
-        const response = await getLostItemMatches(token, lostItem.id, refresh);
+      if (targetLostId) {
+        const response = await getLostItemMatches(token, targetLostId, refresh);
         setData(response);
       } else if (foundItem) {
         const response = await evaluateMatches(token, foundItem.id);
@@ -59,7 +61,7 @@ export function MatchResultsView({ foundItem, lostItem, onBack }: MatchResultsVi
 
   useEffect(() => {
     void loadMatches();
-  }, [foundItem?.id, lostItem?.id, user]);
+  }, [foundItem?.id, targetLostId, user]);
 
   const matches = data?.matches || [];
   const filteredMatches = matches.filter((m) => {
@@ -92,15 +94,17 @@ export function MatchResultsView({ foundItem, lostItem, onBack }: MatchResultsVi
           ← Back
         </button>
         <div className="match-header-info">
-          {isLostView && lostItem ? (
+          {isLostView && targetLostId ? (
             <>
-              <h2>Potential Matches for Lost Item #{lostItem.id}</h2>
-              <p className="found-context-summary">
-                <strong>Lost:</strong> {lostItem.item_name || "Unlabeled item"}{" "}
-                {lostItem.category ? `· ${lostItem.category}` : ""}{" "}
-                {lostItem.campus ? `· ${lostItem.campus}` : ""} on{" "}
-                {lostItem.lost_date}
-              </p>
+              <h2>Potential Matches for Lost Item #{targetLostId}</h2>
+              {lostItem && (
+                <p className="found-context-summary">
+                  <strong>Lost:</strong> {lostItem.item_name || "Unlabeled item"}{" "}
+                  {lostItem.category ? `· ${lostItem.category}` : ""}{" "}
+                  {lostItem.campus ? `· ${lostItem.campus}` : ""} on{" "}
+                  {lostItem.lost_date}
+                </p>
+              )}
             </>
           ) : foundItem ? (
             <>

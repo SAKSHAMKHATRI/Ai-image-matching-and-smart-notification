@@ -14,6 +14,22 @@ from app.services.scoring_service import (
 logger = logging.getLogger(__name__)
 
 
+def _notify_owner_of_possible_match(
+    lost_item: dict[str, Any],
+    found_item: dict[str, Any],
+    score_result: Any,
+) -> None:
+    try:
+        from app.services.notification_service import notify_possible_match
+
+        notify_possible_match(lost_item, found_item, score_result)
+    except Exception as exc:
+        logger.warning(
+            "Failed to notify owner of possible match: %s",
+            exc,
+        )
+
+
 def evaluate_and_persist_matches_for_found_item(
     found_item: dict[str, Any],
     filters: CandidateFilter | None = None,
@@ -52,6 +68,9 @@ def evaluate_and_persist_matches_for_found_item(
             explanation_json=explanation_json,
             status="SUGGESTED",
         )
+
+        # Notify lost item owner of possible match
+        _notify_owner_of_possible_match(lost_item_full, found_item, score_result)
 
         if score_result.classification == MatchClassification.STRONG_CANDIDATE:
             strong_count += 1
@@ -122,6 +141,8 @@ def evaluate_and_persist_matches_for_lost_item(
             explanation_json=explanation_json,
             status="SUGGESTED",
         )
+
+        _notify_owner_of_possible_match(lost_item, found_item_full, score_result)
 
 
 def get_lost_item_matches_response(

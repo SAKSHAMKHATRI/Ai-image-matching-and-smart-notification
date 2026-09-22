@@ -1066,4 +1066,86 @@ export async function searchPublicLostItems(
   return response.json() as Promise<ManualSearchResult<PublicLostItem>>;
 }
 
+export type AppNotification = {
+  id: number;
+  user_id: number;
+  type: string;
+  title: string;
+  message: string;
+  entity_type?: string | null;
+  entity_id?: number | null;
+  is_read: boolean;
+  created_at: string;
+};
+
+export type NotificationListResponse = {
+  notifications: AppNotification[];
+  unread_count: number;
+  total: number;
+};
+
+export async function getNotifications(
+  idToken: string,
+  limit: number = 50,
+  offset: number = 0,
+): Promise<NotificationListResponse> {
+  const response = await fetch(
+    `${apiBaseUrl}/api/notifications?limit=${limit}&offset=${offset}`,
+    {
+      method: "GET",
+      headers: { Authorization: `Bearer ${idToken}` },
+    },
+  );
+  if (!response.ok) {
+    throw await readApiError(response, "Notifications could not be loaded.");
+  }
+  return response.json() as Promise<NotificationListResponse>;
+}
+
+export async function markNotificationAsRead(
+  idToken: string,
+  notificationId: number,
+): Promise<void> {
+  const response = await fetch(
+    `${apiBaseUrl}/api/notifications/${notificationId}/read`,
+    {
+      method: "PATCH",
+      headers: { Authorization: `Bearer ${idToken}` },
+    },
+  );
+  if (!response.ok) {
+    throw await readApiError(response, "Could not update notification status.");
+  }
+}
+
+export async function markAllNotificationsAsRead(idToken: string): Promise<void> {
+  const response = await fetch(`${apiBaseUrl}/api/notifications/read-all`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${idToken}` },
+  });
+  if (!response.ok) {
+    throw await readApiError(response, "Could not mark all notifications as read.");
+  }
+}
+
+export async function analyzeLostItemImage(
+  idToken: string,
+  imageFile: File,
+): Promise<ImageAnalysisResult> {
+  const formData = new FormData();
+  formData.append("image", imageFile);
+
+  const response = await fetch(`${apiBaseUrl}/api/lost-items/analyze-image`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${idToken}` },
+    body: formData,
+  });
+
+  if (!response.ok) {
+    throw await readApiError(response, "Lost item image analysis failed.");
+  }
+
+  return response.json() as Promise<ImageAnalysisResult>;
+}
+
 export { networkError };

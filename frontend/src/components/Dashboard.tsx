@@ -6,10 +6,12 @@ import {
   getMyFoundItems,
   getMyLostItems,
   getMyProfile,
+  getNotifications,
   type FoundItem,
   type LostItem,
   type StudentProfile,
 } from "../services/api";
+import { NotificationsModal } from "./NotificationsModal";
 
 export type DashboardView = "dashboard" | "profile" | "lost" | "found" | "matches" | "admin" | "search";
 
@@ -18,6 +20,7 @@ type DashboardProps = {
   onNavigate: (view: DashboardView) => void;
   onSelectFoundItemForMatches?: (foundItem: FoundItem) => void;
   onSelectLostItemForMatches?: (lostItem: LostItem) => void;
+  onSelectLostItemIdForMatches?: (lostItemId: number) => void;
 };
 
 function formatCount(count: number, singular: string) {
@@ -29,11 +32,14 @@ export function Dashboard({
   onNavigate,
   onSelectFoundItemForMatches,
   onSelectLostItemForMatches,
+  onSelectLostItemIdForMatches,
 }: DashboardProps) {
   const { user, logOut } = useAuth();
   const [profile, setProfile] = useState<StudentProfile | null>(null);
   const [lostItems, setLostItems] = useState<LostItem[]>([]);
   const [foundItems, setFoundItems] = useState<FoundItem[]>([]);
+  const [unreadNotifications, setUnreadNotifications] = useState(0);
+  const [showNotifications, setShowNotifications] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -48,15 +54,17 @@ export function Dashboard({
     void (async () => {
       try {
         const token = await user!.getIdToken();
-        const [loadedProfile, lost, found] = await Promise.all([
+        const [loadedProfile, lost, found, notifs] = await Promise.all([
           getMyProfile(token),
           getMyLostItems(token),
           getMyFoundItems(token),
+          getNotifications(token).catch(() => ({ notifications: [], unread_count: 0, total: 0 })),
         ]);
         if (!active) return;
         setProfile(loadedProfile);
         setLostItems(lost);
         setFoundItems(found);
+        setUnreadNotifications(notifs.unread_count);
       } catch (loadError) {
         if (active) {
           setError(
@@ -88,14 +96,47 @@ export function Dashboard({
     onNavigate("matches");
   }
 
+  function handleOpenLostItemMatchesFromNotification(lostItemId: number) {
+    if (onSelectLostItemIdForMatches) {
+      onSelectLostItemIdForMatches(lostItemId);
+    } else {
+      const match = lostItems.find((item) => item.id === lostItemId);
+      if (match && onSelectLostItemForMatches) {
+        onSelectLostItemForMatches(match);
+      }
+    }
+    onNavigate("matches");
+  }
+
   if (loading) {
     return <p role="status">Loading dashboard...</p>;
   }
 
   return (
     <section className="welcome-panel dashboard" aria-labelledby="dashboard-title">
-      <p className="eyebrow">University services</p>
-      <h1 id="dashboard-title">Lost &amp; Found</h1>
+      <div className="dashboard-header-row">
+        <div>
+          <p className="eyebrow">University services</p>
+          <h1 id="dashboard-title">Lost &amp; Found</h1>
+        </div>
+        <div className="dashboard-header-actions">
+          <button
+            type="button"
+            className="secondary-button notification-bell-btn"
+            onClick={() => setShowNotifications(true)}
+            aria-label="View notifications"
+            data-testid="notification-bell-btn"
+          >
+            🔔 Notifications
+            {unreadNotifications > 0 && (
+              <span className="badge badge-unread-counter" data-testid="notification-badge-count">
+                {unreadNotifications}
+              </span>
+            )}
+          </button>
+        </div>
+      </div>
+
       <p className="lead">
         Welcome to the campus Lost &amp; Found portal. Report missing belongings, submit
         items you found, or check existing reports for potential matches.
@@ -106,6 +147,13 @@ export function Dashboard({
           {error}
         </p>
       )}
+
+      <NotificationsModal
+        isOpen={showNotifications}
+        onClose={() => setShowNotifications(false)}
+        onOpenLostItemMatches={handleOpenLostItemMatchesFromNotification}
+        onUnreadCountChange={setUnreadNotifications}
+      />
 
       <div className="dashboard-grid">
         <article className="action-card" aria-labelledby="profile-card-title">

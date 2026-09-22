@@ -124,6 +124,18 @@ def request_claim(
             ),
         )
 
+    try:
+        from app.services.notification_service import notify_claim_submitted
+
+        notify_claim_submitted(
+            claim_id=claim_id,
+            claimant_user_id=claimant_user_id,
+            lost_item=lost_item,
+            found_item=found_item,
+        )
+    except Exception as exc:
+        logger.warning("Failed to dispatch claim submitted notification: %s", exc)
+
     return repositories.get_claim(claim_id)  # type: ignore
 
 
@@ -366,6 +378,17 @@ def process_claim_decision(
             ),
         )
 
+    try:
+        from app.services.notification_service import notify_claim_status_change
+
+        notify_claim_status_change(
+            claim_id=claim_id,
+            new_status=new_status,
+            claimant_user_id=claim["claimant_user_id"],
+        )
+    except Exception as exc:
+        logger.warning("Failed to dispatch claim decision notification: %s", exc)
+
     return get_claim_detail(claim_id, user_id, is_admin)
 
 
@@ -526,6 +549,17 @@ def process_item_return(
             ),
         )
 
+    try:
+        from app.services.notification_service import notify_claim_status_change
+
+        notify_claim_status_change(
+            claim_id=claim_id,
+            new_status="RETURNED",
+            claimant_user_id=claim["claimant_user_id"],
+        )
+    except Exception as exc:
+        logger.warning("Failed to dispatch claim return notification: %s", exc)
+
     return get_claim_detail(claim_id, user_id, is_admin)
 
 
@@ -617,6 +651,17 @@ def admin_override_claim(
                 ),
             ),
         )
+
+    try:
+        from app.services.notification_service import notify_claim_status_change
+
+        notify_claim_status_change(
+            claim_id=claim_id,
+            new_status=status_str,
+            claimant_user_id=claim["claimant_user_id"],
+        )
+    except Exception as exc:
+        logger.warning("Failed to dispatch admin claim status notification: %s", exc)
 
     return get_claim_detail(claim_id, admin_user_id, is_admin=True)
 

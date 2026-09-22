@@ -1,4 +1,5 @@
 import logging
+from typing import Any
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 
@@ -144,6 +145,68 @@ def delete_my_lost_item(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Lost item not found.")
 
 
+@router.post("/analyze-image")
+async def analyze_lost_image_preview(
+    image: UploadFile = File(...),
+    current_user: AuthenticatedUser = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Analyze an uploaded lost item photo to extract visible attributes."""
+    from app.services.analysis_service import get_analysis_provider, AnalysisUnavailable
+
+    contents, content_type = await validate_and_read_image(image)
+    try:
+        provider = get_analysis_provider()
+        result = provider.analyze_bytes(contents, content_type=content_type)
+        attrs = result.attributes
+        features_list = attrs.get("visible_features", [])
+        distinctive_features = ", ".join(features_list) if features_list else None
+        visible_text_list = attrs.get("visible_text", [])
+        if visible_text_list:
+            text_str = ", ".join(str(t) for t in visible_text_list if str(t).strip())
+            if text_str:
+                if distinctive_features:
+                    distinctive_features = f"{distinctive_features} (Text: {text_str})"
+                else:
+                    distinctive_features = f"Text: {text_str}"
+        return {
+            "success": True,
+            "message": "AI analyzed the lost item photo successfully.",
+            "description": result.description,
+            "item_name": attrs.get("object_type"),
+            "category": attrs.get("category"),
+            "color": attrs.get("primary_color"),
+            "brand": attrs.get("brand"),
+            "distinctive_features": distinctive_features,
+            "attributes": attrs,
+        }
+    except AnalysisUnavailable as exc:
+        logger.info("Foundry analysis unavailable for lost image preview: %s", exc)
+        return {
+            "success": False,
+            "message": "AI analysis is unavailable; you can enter details manually.",
+            "description": None,
+            "item_name": None,
+            "category": None,
+            "color": None,
+            "brand": None,
+            "distinctive_features": None,
+            "attributes": None,
+        }
+    except Exception as exc:
+        logger.warning("Lost image analysis preview failed: %s", exc)
+        return {
+            "success": False,
+            "message": "AI analysis timed out or could not process image; you can enter details manually.",
+            "description": None,
+            "item_name": None,
+            "category": None,
+            "color": None,
+            "brand": None,
+            "distinctive_features": None,
+            "attributes": None,
+        }
+
+
 @router.post("/{item_id}/image", response_model=LostItemResponse)
 async def upload_lost_item_image(
     item_id: int,
@@ -165,11 +228,32 @@ async def upload_lost_item_image(
             detail="Image storage is temporarily unavailable.",
         ) from exc
 
+    updates: dict[str, Any] = {"image_reference": stored_image.path}
+
+    # Extract image embedding via Foundry vision if available
+    try:
+        from app.services.analysis_service import get_analysis_provider
+        provider = get_analysis_provider()
+        result = provider.analyze_bytes(contents, content_type=content_type)
+        if result.description:
+            emb_provider = get_embedding_provider()
+            emb_res = emb_provider.embed_text(result.description)
+            if emb_res.status == "SUCCESS":
+                updates["image_embedding_blob"] = serialize_embedding(emb_res.vector)
+    except Exception as exc:
+        logger.info("Optional vision analysis for lost item image skipped: %s", exc)
+
     updated_item = repositories.update_lost_item_for_user(
         user_id,
         item_id,
-        {"image_reference": stored_image.path},
+        updates,
     )
     if updated_item is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Lost item not found.")
+
+    try:
+        evaluate_and_persist_matches_for_lost_item(updated_item)
+    except Exception as exc:
+        logger.warning("Automatic match evaluation for updated lost item image %d failed: %s", item_id, exc)
+
     return serialize_lost_item(updated_item)

@@ -685,3 +685,119 @@ def search_public_lost_items(
         ).fetchall()
 
     return [dict(row) for row in rows], total_count
+
+
+# --- Phase 17: Notification Repositories ---
+
+def create_notification(
+    user_id: int,
+    type: str,
+    title: str,
+    message: str,
+    entity_type: str | None = None,
+    entity_id: int | None = None,
+    email_status: str = "SKIPPED",
+    email_recipient: str | None = None,
+    email_error: str | None = None,
+) -> int:
+    with db.get_connection() as connection:
+        cursor = connection.execute(
+            """
+            INSERT INTO notifications (
+                user_id, type, title, message, entity_type, entity_id,
+                email_status, email_recipient, email_error
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (user_id, type, title, message, entity_type, entity_id, email_status, email_recipient, email_error),
+        )
+        return int(cursor.lastrowid)
+
+
+def notification_exists_for_entity(
+    user_id: int,
+    type: str,
+    entity_type: str,
+    entity_id: int,
+) -> bool:
+    with db.get_connection() as connection:
+        row = connection.execute(
+            """
+            SELECT 1 FROM notifications
+            WHERE user_id = ? AND type = ? AND entity_type = ? AND entity_id = ?
+            LIMIT 1
+            """,
+            (user_id, type, entity_type, entity_id),
+        ).fetchone()
+        return row is not None
+
+
+def list_notifications_for_user(
+    user_id: int,
+    limit: int = 50,
+    offset: int = 0,
+) -> list[dict[str, Any]]:
+    with db.get_connection() as connection:
+        rows = connection.execute(
+            """
+            SELECT id, user_id, type, title, message, entity_type, entity_id, is_read,
+                   email_status, email_recipient, email_error, created_at
+            FROM notifications
+            WHERE user_id = ?
+            ORDER BY created_at DESC, id DESC
+            LIMIT ? OFFSET ?
+            """,
+            (user_id, limit, offset),
+        ).fetchall()
+        return [
+            {
+                "id": r["id"],
+                "user_id": r["user_id"],
+                "type": r["type"],
+                "title": r["title"],
+                "message": r["message"],
+                "entity_type": r["entity_type"],
+                "entity_id": r["entity_id"],
+                "is_read": bool(r["is_read"]),
+                "email_status": r["email_status"] if "email_status" in r.keys() else "SKIPPED",
+                "email_recipient": r["email_recipient"] if "email_recipient" in r.keys() else None,
+                "email_error": r["email_error"] if "email_error" in r.keys() else None,
+                "created_at": r["created_at"],
+            }
+            for r in rows
+        ]
+
+
+def get_admin_user_ids() -> list[int]:
+    with db.get_connection() as connection:
+        rows = connection.execute(
+            "SELECT id FROM users WHERE role = 'ADMIN' AND status = 'ACTIVE'"
+        ).fetchall()
+        return [int(r["id"]) for r in rows]
+
+
+def count_unread_notifications_for_user(user_id: int) -> int:
+    with db.get_connection() as connection:
+        row = connection.execute(
+            "SELECT COUNT(*) FROM notifications WHERE user_id = ? AND is_read = 0",
+            (user_id,),
+        ).fetchone()
+        return int(row[0]) if row else 0
+
+
+def mark_notification_read(user_id: int, notification_id: int) -> bool:
+    with db.get_connection() as connection:
+        cursor = connection.execute(
+            "UPDATE notifications SET is_read = 1 WHERE id = ? AND user_id = ?",
+            (notification_id, user_id),
+        )
+        return cursor.rowcount > 0
+
+
+def mark_all_notifications_read(user_id: int) -> int:
+    with db.get_connection() as connection:
+        cursor = connection.execute(
+            "UPDATE notifications SET is_read = 1 WHERE user_id = ? AND is_read = 0",
+            (user_id,),
+        )
+        return int(cursor.rowcount)
