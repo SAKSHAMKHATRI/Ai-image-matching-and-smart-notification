@@ -2,13 +2,19 @@ import { useState, type FormEvent } from "react";
 
 import { useAuth } from "../auth/AuthContext";
 import {
+  ApiError,
   createFoundItem,
   triggerFoundItemAnalysis,
   uploadFoundItemImage,
   type FoundItem,
 } from "../services/api";
 
-export function FoundItemForm() {
+type FoundItemFormProps = {
+  /** Optional: when provided, shows a "Back" action above the form. */
+  onBack?: () => void;
+};
+
+export function FoundItemForm({ onBack }: FoundItemFormProps = {}) {
   const { user } = useAuth();
   const [foundDate, setFoundDate] = useState("");
   const [foundLocation, setFoundLocation] = useState("");
@@ -38,8 +44,12 @@ export function FoundItemForm() {
       } else {
         setMessage("Found item reported. Add a photo before requesting analysis.");
       }
-    } catch {
-      setError("The found item could not be reported. Check the details and image.");
+    } catch (submitError) {
+      setError(
+        submitError instanceof ApiError
+          ? submitError.message
+          : "The found item could not be reported. Check the details and image.",
+      );
     } finally {
       setSaving(false);
     }
@@ -59,7 +69,14 @@ export function FoundItemForm() {
         <label>Found-item photo<input accept="image/jpeg,image/png,image/webp" onChange={(event) => setImage(event.target.files?.[0] ?? null)} required type="file" /></label>
         {error && <p className="error-message" role="alert">{error}</p>}
         {message && <p className="success-message" role="status">{message}</p>}
-        <button className="primary-button" disabled={saving} type="submit">{saving ? "Reporting..." : "Report and analyze"}</button>
+        <div className="button-row">
+          {onBack && (
+            <button className="secondary-button" onClick={onBack} type="button">
+              ← Back
+            </button>
+          )}
+          <button className="primary-button" disabled={saving} type="submit">{saving ? "Reporting..." : "Report and analyze"}</button>
+        </div>
       </form>
       {foundItem && (
         <div className="identity-panel" role="status">

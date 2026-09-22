@@ -32,6 +32,7 @@ def get_firebase_app() -> firebase_admin.App:
                 "project_id": options["projectId"],
                 "client_email": options["clientEmail"],
                 "private_key": options["privateKey"],
+                "token_uri": options["tokenUri"],
             }
         )
         return firebase_admin.initialize_app(service_account)
@@ -55,7 +56,16 @@ def get_storage_bucket():
 
 def verify_firebase_token(token: str) -> dict[str, Any]:
     try:
-        return auth.verify_id_token(token, app=get_firebase_app())
+        firebase_app = get_firebase_app()
+    except FirebaseConfigError as exc:
+        # Server-side configuration is broken: this is not the caller's fault.
+        # Surface 503 instead of masking it as an authentication failure.
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Authentication service is not configured. Contact the administrator.",
+        ) from exc
+    try:
+        return auth.verify_id_token(token, app=firebase_app)
     except Exception as exc:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -78,6 +88,11 @@ def get_current_user(
         decoded_token = verify_firebase_token(credentials_header.credentials)
     except HTTPException:
         raise
+    except FirebaseConfigError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Authentication service is not configured. Contact the administrator.",
+        ) from exc
     except Exception as exc:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

@@ -13,4 +13,6 @@ Phase 4 adds owner-scoped lost-item CRUD APIs and a frontend report form. Phase 
 
 Phase 6 adds owner-scoped found-item reporting, secure found-item image storage, and a provider-neutral analysis trigger. The trigger has an explicit unavailable fallback and does not include Microsoft Foundry credentials, network calls, OCR, embeddings, candidate retrieval, or matching.
 
+Phase 7 adds a backend-only Microsoft Foundry project client. It uses the configurable project endpoint and API key, bounded timeouts/retries, and safe generic service errors. The frontend never receives Foundry configuration.
+
 Found-item workflows, AI, matching, claims, notifications, and administration belong to later phases and are intentionally absent from this foundation.

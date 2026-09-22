@@ -57,6 +57,80 @@ export type FoundItem = {
   updated_at: string;
 };
 
+/** Field-level validation messages returned by the backend (FastAPI 422). */
+export type FieldErrors = Partial<Record<string, string>>;
+
+/** Error carrying the backend's actual message plus optional field errors. */
+export class ApiError extends Error {
+  readonly status: number;
+  readonly fieldErrors: FieldErrors;
+
+  constructor(status: number, message: string, fieldErrors: FieldErrors = {}) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+    this.fieldErrors = fieldErrors;
+  }
+}
+
+type BackendErrorDetail = {
+  detail?: unknown;
+};
+
+function extractFieldErrors(detail: unknown): FieldErrors {
+  if (!Array.isArray(detail)) {
+    return {};
+  }
+  const fieldErrors: FieldErrors = {};
+  for (const item of detail) {
+    if (
+      item &&
+      typeof item === "object" &&
+      "loc" in item &&
+      "msg" in item &&
+      Array.isArray((item as { loc: unknown }).loc)
+    ) {
+      const loc = (item as { loc: unknown[] }).loc;
+      const field = loc.length > 0 ? String(loc[loc.length - 1]) : "";
+      if (field && fieldErrors[field] === undefined) {
+        fieldErrors[field] = String((item as { msg: unknown }).msg);
+      }
+    }
+  }
+  return fieldErrors;
+}
+
+async function readApiError(response: Response, fallback: string): Promise<ApiError> {
+  let message = fallback;
+  let fieldErrors: FieldErrors = {};
+  try {
+    const body = (await response.json()) as BackendErrorDetail;
+    if (typeof body?.detail === "string" && body.detail.trim()) {
+      message = body.detail;
+    } else if (body?.detail !== undefined) {
+      fieldErrors = extractFieldErrors(body.detail);
+      if (Object.keys(fieldErrors).length > 0) {
+        message = "Some fields need attention before saving.";
+      }
+    }
+  } catch {
+    // Keep the fallback message when the body is not readable JSON.
+  }
+  return new ApiError(response.status, message, fieldErrors);
+}
+
+function networkError(error: unknown, fallback: string): ApiError {
+  if (error instanceof ApiError) {
+    return error;
+  }
+  // fetch() rejects on network/CORS failures before any response exists.
+  return new ApiError(
+    0,
+    "The server could not be reached. Check that the backend is running and try again.",
+    {},
+  );
+}
+
 export async function getCurrentIdentity(
   idToken: string,
 ): Promise<AuthenticatedIdentity> {
@@ -67,7 +141,10 @@ export async function getCurrentIdentity(
   });
 
   if (!response.ok) {
-    throw new Error("The backend could not verify your authentication.");
+    throw await readApiError(
+      response,
+      "The backend could not verify your authentication.",
+    );
   }
 
   return response.json() as Promise<AuthenticatedIdentity>;
@@ -94,7 +171,7 @@ export async function getMyProfile(idToken: string): Promise<StudentProfile | nu
     return null;
   }
   if (!response.ok) {
-    throw new Error("The profile could not be loaded.");
+    throw await readApiError(response, "The profile could not be loaded.");
   }
   return response.json() as Promise<StudentProfile>;
 }
@@ -106,7 +183,7 @@ export async function saveMyProfile(
 ): Promise<StudentProfile> {
   const response = await profileRequest(idToken, exists ? "PATCH" : "POST", profile);
   if (!response.ok) {
-    throw new Error("The profile could not be saved.");
+    throw await readApiError(response, "The profile could not be saved.");
   }
   return response.json() as Promise<StudentProfile>;
 }
@@ -116,9 +193,19 @@ export async function getMyLostItems(idToken: string): Promise<LostItem[]> {
     headers: { Authorization: `Bearer ${idToken}` },
   });
   if (!response.ok) {
-    throw new Error("Lost reports could not be loaded.");
+    throw await readApiError(response, "Lost reports could not be loaded.");
   }
   return response.json() as Promise<LostItem[]>;
+}
+
+export async function getMyFoundItems(idToken: string): Promise<FoundItem[]> {
+  const response = await fetch(`${apiBaseUrl}/api/found-items`, {
+    headers: { Authorization: `Bearer ${idToken}` },
+  });
+  if (!response.ok) {
+    throw await readApiError(response, "Found reports could not be loaded.");
+  }
+  return response.json() as Promise<FoundItem[]>;
 }
 
 export async function saveLostItem(
@@ -138,7 +225,7 @@ export async function saveLostItem(
     },
   );
   if (!response.ok) {
-    throw new Error("Lost report could not be saved.");
+    throw await readApiError(response, "Lost report could not be saved.");
   }
   return response.json() as Promise<LostItem>;
 }
@@ -149,7 +236,7 @@ export async function deleteLostItem(idToken: string, itemId: number): Promise<v
     headers: { Authorization: `Bearer ${idToken}` },
   });
   if (!response.ok) {
-    throw new Error("Lost report could not be deleted.");
+    throw await readApiError(response, "Lost report could not be deleted.");
   }
 }
 
@@ -166,7 +253,7 @@ export async function uploadLostItemImage(
     body: formData,
   });
   if (!response.ok) {
-    throw new Error("Image could not be stored.");
+    throw await readApiError(response, "Image could not be stored.");
   }
   return response.json() as Promise<LostItem>;
 }
@@ -190,7 +277,7 @@ export async function createFoundItem(
     }),
   });
   if (!response.ok) {
-    throw new Error("Found item could not be reported.");
+    throw await readApiError(response, "Found item could not be reported.");
   }
   return response.json() as Promise<FoundItem>;
 }
@@ -208,7 +295,7 @@ export async function uploadFoundItemImage(
     body: formData,
   });
   if (!response.ok) {
-    throw new Error("Found-item image could not be stored.");
+    throw await readApiError(response, "Found-item image could not be stored.");
   }
   return response.json() as Promise<FoundItem>;
 }
@@ -222,7 +309,7 @@ export async function triggerFoundItemAnalysis(
     headers: { Authorization: `Bearer ${idToken}` },
   });
   if (!response.ok) {
-    throw new Error("Found-item analysis could not be started.");
+    throw await readApiError(response, "Found-item analysis could not be started.");
   }
   return response.json() as Promise<{
     found_item: FoundItem;
@@ -230,3 +317,5 @@ export async function triggerFoundItemAnalysis(
     message: string;
   }>;
 }
+
+export { networkError };

@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from "react";
 
 import { useAuth } from "../auth/AuthContext";
 import {
+  ApiError,
   deleteLostItem,
   getMyLostItems,
   saveLostItem,
@@ -22,7 +23,12 @@ const emptyItem: LostItemInput = {
   image_reference: null,
 };
 
-export function LostItemForm() {
+type LostItemFormProps = {
+  /** Optional: when provided, shows a "Back" action above the form. */
+  onBack?: () => void;
+};
+
+export function LostItemForm({ onBack }: LostItemFormProps = {}) {
   const { user } = useAuth();
   const [reports, setReports] = useState<LostItem[]>([]);
   const [item, setItem] = useState<LostItemInput>(emptyItem);
@@ -88,8 +94,12 @@ export function LostItemForm() {
       setEditingId(undefined);
       setSelectedImage(null);
       setSuccess(editingId ? "Lost report updated." : "Lost report created.");
-    } catch {
-      setError("Check the report details and try again.");
+    } catch (submitError) {
+      setError(
+        submitError instanceof ApiError
+          ? submitError.message
+          : "Check the report details and try again.",
+      );
     } finally {
       setSaving(false);
     }
@@ -102,8 +112,12 @@ export function LostItemForm() {
       await deleteLostItem(token, itemId);
       await loadReports();
       setSuccess("Lost report deleted.");
-    } catch {
-      setError("The lost report could not be deleted.");
+    } catch (deleteError) {
+      setError(
+        deleteError instanceof ApiError
+          ? deleteError.message
+          : "The lost report could not be deleted.",
+      );
     }
   }
 
@@ -130,10 +144,15 @@ export function LostItemForm() {
         <label>Optional image<input accept="image/jpeg,image/png,image/webp" onChange={(event) => setSelectedImage(event.target.files?.[0] ?? null)} type="file" /></label>
         {error && <p className="error-message" role="alert">{error}</p>}
         {success && <p className="success-message" role="status">{success}</p>}
-        <div className="button-row">
-          <button className="primary-button" disabled={saving} type="submit">{saving ? "Saving..." : editingId ? "Update report" : "Create report"}</button>
-          {editingId && <button className="secondary-button" onClick={() => { setEditingId(undefined); setItem(emptyItem); }} type="button">Cancel edit</button>}
-        </div>
+      <div className="button-row">
+        {onBack && (
+          <button className="secondary-button" onClick={onBack} type="button">
+            ← Back
+          </button>
+        )}
+        <button className="primary-button" disabled={saving} type="submit">{saving ? "Saving..." : editingId ? "Update report" : "Create report"}</button>
+        {editingId && <button className="secondary-button" onClick={() => { setEditingId(undefined); setItem(emptyItem); }} type="button">Cancel edit</button>}
+      </div>
       </form>
       <div className="report-list" aria-label="Your lost reports">
         <h3>Your reports</h3>

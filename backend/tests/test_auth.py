@@ -73,8 +73,9 @@ def test_malformed_authorization_scheme_is_rejected() -> None:
     assert response.json()["detail"] == "Authentication required."
 
 
-def test_missing_firebase_configuration_returns_authentication_failure(monkeypatch) -> None:
+def test_missing_firebase_configuration_returns_service_unavailable(monkeypatch) -> None:
     for variable in (
+        "FIREBASE_SERVICE_ACCOUNT_PATH",
         "FIREBASE_SERVICE_ACCOUNT_JSON",
         "FIREBASE_PROJECT_ID",
         "FIREBASE_CLIENT_EMAIL",
@@ -90,5 +91,8 @@ def test_missing_firebase_configuration_returns_authentication_failure(monkeypat
         headers={"Authorization": "Bearer token-without-config"},
     )
 
-    assert response.status_code == 401
-    assert response.json()["detail"] == "Invalid or expired authentication token."
+    # A server-side misconfiguration is 503, not a caller-side 401.
+    assert response.status_code == 503
+    assert response.json()["detail"] == (
+        "Authentication service is not configured. Contact the administrator."
+    )

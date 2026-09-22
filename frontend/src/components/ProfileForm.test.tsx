@@ -3,13 +3,22 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ProfileForm } from "./ProfileForm";
 import { useAuth } from "../auth/AuthContext";
-import { getMyProfile, saveMyProfile } from "../services/api";
+import { ApiError, getMyProfile, saveMyProfile } from "../services/api";
 
 vi.mock("../auth/AuthContext", () => ({
   useAuth: vi.fn(),
 }));
 
 vi.mock("../services/api", () => ({
+  ApiError: class ApiError extends Error {
+    status: number;
+    fieldErrors: Record<string, string>;
+    constructor(status: number, message: string, fieldErrors: Record<string, string> = {}) {
+      super(message);
+      this.status = status;
+      this.fieldErrors = fieldErrors;
+    }
+  },
   getMyProfile: vi.fn(),
   saveMyProfile: vi.fn(),
 }));
@@ -77,5 +86,43 @@ describe("ProfileForm", () => {
     await waitFor(() => expect(mockedSaveMyProfile).toHaveBeenCalled());
     expect(mockedSaveMyProfile.mock.calls[0]?.[0]).toBe("verified-token");
     expect(mockedSaveMyProfile.mock.calls[0]?.[2]).toBe(true);
+  });
+
+  it("shows field-level messages and skips the API when required fields are empty", async () => {
+    mockedGetMyProfile.mockResolvedValue(null);
+
+    render(<ProfileForm />);
+
+    await screen.findByRole("heading", { name: "Your university details" });
+    fireEvent.click(screen.getByRole("button", { name: "Save profile" }));
+
+    expect(await screen.findByText("Full name is required.")).toBeVisible();
+    expect(screen.getByText("Roll number is required.")).toBeVisible();
+    expect(screen.getByText("University email is required.")).toBeVisible();
+    expect(mockedSaveMyProfile).not.toHaveBeenCalled();
+  });
+
+  it("shows the backend's field errors instead of a generic message", async () => {
+    mockedGetMyProfile.mockResolvedValue(null);
+    mockedSaveMyProfile.mockRejectedValue(
+      new ApiError(422, "Some fields need attention before saving.", {
+        phone_number: "Enter a valid phone number.",
+      }),
+    );
+
+    render(<ProfileForm />);
+
+    await screen.findByRole("heading", { name: "Your university details" });
+    fireEvent.change(screen.getByLabelText("Full name"), { target: { value: "Ada Lovelace" } });
+    fireEvent.change(screen.getByLabelText("Roll number"), { target: { value: "CS-001" } });
+    fireEvent.change(screen.getByLabelText("Class / section"), { target: { value: "A" } });
+    fireEvent.change(screen.getByLabelText("Course / program"), { target: { value: "Computer Science" } });
+    fireEvent.change(screen.getByLabelText("Phone number"), { target: { value: "bad" } });
+    fireEvent.change(screen.getByLabelText("University email"), { target: { value: "ada@example.edu" } });
+    fireEvent.change(screen.getByLabelText("Campus"), { target: { value: "North Campus" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save profile" }));
+
+    expect(await screen.findByText("Enter a valid phone number.")).toBeVisible();
+    expect(screen.queryByText(/Check the profile details/i)).toBeNull();
   });
 });

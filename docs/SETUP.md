@@ -34,7 +34,13 @@ Deploy `storage.rules` to Firebase Storage so browser clients cannot access the 
 
 Found-item reporting uses `/api/found-items`. `POST /api/found-items/{id}/analyze` is a Phase 6 interface only; it returns an AI-unavailable fallback until the Phase 7 provider is implemented. No Foundry environment variables are required for Phase 6.
 
+Phase 7 Foundry configuration is backend-only: set `FOUNDRY_PROJECT_ENDPOINT`, `FOUNDRY_API_KEY`, and `FOUNDRY_MODEL_NAME` in the local backend `.env`. Configure timeout and retry behavior with `FOUNDRY_TIMEOUT_SECONDS` and `FOUNDRY_MAX_RETRIES`. Never place these values in frontend variables, source code, tests, or committed files.
+
 For local browser requests, `BACKEND_CORS_ORIGINS` allows the two default Vite origins. Set it explicitly when using another frontend origin.
+
+## Troubleshooting: "Authentication service is not configured"
+
+If protected API calls return the error `Authentication service is not configured. Contact the administrator.` (HTTP 503), the backend has no Firebase Admin credentials. Set `FIREBASE_PROJECT_ID`, `FIREBASE_CLIENT_EMAIL`, and `FIREBASE_PRIVATE_KEY` (or `FIREBASE_SERVICE_ACCOUNT_JSON`) in the local backend `.env`, then restart `uvicorn`. Until then, login works but every profile, lost-item, and found-item request fails, and profile saves show a validation error.
 
 ## Environment and secrets
 
