@@ -69,6 +69,14 @@ def retrieve_candidates(
     if found_item is None:
         raise ValueError(f"Found item {found_item_id} does not exist.")
 
+    if found_item.get("status") in ("RETURNED", "CLOSED"):
+        return {
+            "found_item_id": found_item_id,
+            "candidates": [],
+            "total_candidates": 0,
+            "filters_applied": {"status": "INACTIVE"},
+        }
+
     # Merge explicit filters with auto-derived values from the found item
     effective_category = filters.category
     effective_campus = filters.campus

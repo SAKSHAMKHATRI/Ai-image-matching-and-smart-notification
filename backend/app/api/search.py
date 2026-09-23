@@ -80,24 +80,37 @@ def search_found_items(
         offset=offset,
     )
 
-    items = [
-        PublicFoundItemResponse(
-            id=item["id"],
-            status=item["status"],
-            found_date=item.get("found_at") or "",
-            found_location=item.get("location"),
-            campus=item.get("campus"),
-            item_name=item.get("item_name"),
-            category=item.get("category"),
-            color=item.get("color"),
-            brand=item.get("brand"),
-            description=item.get("description"),
-            distinctive_features=item.get("distinctive_features"),
-            image_reference=item.get("image_reference"),
-            created_at=item.get("created_at") or "",
+    items = []
+    for item in items_raw:
+        finder_id = item.get("user_id")
+        finder_display = "Campus Student"
+        if finder_id:
+            try:
+                from app.services.notification_service import get_user_display_name
+
+                finder_display = get_user_display_name(finder_id)
+            except Exception:
+                finder_display = "Campus Student"
+
+        items.append(
+            PublicFoundItemResponse(
+                id=item["id"],
+                status=item["status"],
+                found_date=item.get("found_at") or "",
+                found_location=item.get("location"),
+                campus=item.get("campus"),
+                item_name=item.get("item_name"),
+                category=item.get("category"),
+                color=item.get("color"),
+                brand=item.get("brand"),
+                description=item.get("description"),
+                distinctive_features=item.get("distinctive_features"),
+                image_reference=item.get("image_reference"),
+                found_by=finder_display,
+                finder_name=finder_display,
+                created_at=item.get("created_at") or "",
+            )
         )
-        for item in items_raw
-    ]
 
     filters_applied: dict[str, Any] = {}
     if query:

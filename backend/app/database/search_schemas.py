@@ -31,6 +31,8 @@ class PublicFoundItemResponse(BaseModel):
     description: str | None = None
     distinctive_features: str | None = None
     image_reference: str | None = None
+    found_by: str | None = None
+    finder_name: str | None = None
     created_at: str
 
 

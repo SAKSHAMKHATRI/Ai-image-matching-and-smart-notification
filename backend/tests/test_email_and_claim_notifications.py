@@ -696,6 +696,200 @@ def test_unauthorized_user_cannot_create_or_view_another_users_claim(
     app.dependency_overrides[get_current_user] = lambda: user_c_auth
     unauth_view = client.get(f"/api/claims/{claim_id}")
     assert unauth_view.status_code == 403
+def test_privacy_restrictions_verification_notes_hidden_from_finder(
+    clean_test_db, mock_email_transport, user_a_auth, user_b_auth, admin_auth
+):
+    """TEST 11: Private verification notes must NOT be visible to Finder, but visible to Claimant and Admin."""
+    client = TestClient(app)
+
+    create_test_student(user_a_auth, "Alice Owner", "2410990001")
+    create_test_student(user_b_auth, "Bob Finder", "2410990002")
+    db.ensure_user(admin_auth.uid, role="ADMIN", email=admin_auth.email)
+
+    app.dependency_overrides[get_current_user] = lambda: user_a_auth
+    lost_resp = client.post(
+        "/api/lost-items",
+        json={
+            "item_name": "Leather Wallet",
+            "category": "Personal Items",
+            "lost_date": "2026-09-20",
+            "approximate_location": "Cafeteria",
+            "description": "Brown leather wallet with ID card",
+        },
+    )
+    assert lost_resp.status_code == 201
+    lost_id = lost_resp.json()["id"]
+
+    app.dependency_overrides[get_current_user] = lambda: user_b_auth
+    found_resp = client.post(
+        "/api/found-items",
+        json={
+            "item_name": "Leather Wallet",
+            "category": "Personal Items",
+            "found_date": "2026-09-20",
+            "found_location": "Cafeteria Table 4",
+            "description": "Found brown wallet",
+        },
+    )
+    assert found_resp.status_code == 201
+    found_id = found_resp.json()["id"]
+
+    with db.get_connection() as conn:
+        match_id = conn.execute("SELECT id FROM matches WHERE found_item_id = ?", (found_id,)).fetchone()["id"]
+
+    # User A initiates claim with super sensitive verification answer
+    app.dependency_overrides[get_current_user] = lambda: user_a_auth
+    claim_resp = client.post(
+        "/api/claims",
+        json={
+            "match_id": match_id,
+            "claim_explanation": "I left it on the bench",
+            "verification_notes": "Contains my driver license ending with 9999 and a photo of my dog",
+        },
+    )
+    assert claim_resp.status_code == 201
+    claim_id = claim_resp.json()["id"]
+
+    # 1. Claimant (User A) views claim: CAN see their own notes
+    a_claim = client.get(f"/api/claims/{claim_id}").json()
+    assert a_claim["verification_notes"] is not None
+    assert "driver license ending with 9999" in a_claim["verification_notes"]
+
+    # 2. Finder (User B) views claim: CANNOT see private verification notes (masked to None)
+    app.dependency_overrides[get_current_user] = lambda: user_b_auth
+    b_claim = client.get(f"/api/claims/{claim_id}").json()
+    assert b_claim["verification_notes"] is None
+
+    # 3. Finder views my-claims: verification_notes must be None
+    b_my_claims = client.get("/api/claims/my-claims").json()
+    b_claim_summary = next((c for c in b_my_claims if c["id"] == claim_id), None)
+    assert b_claim_summary is not None
+    assert b_claim_summary["verification_notes"] is None
+
+    # 4. Admin views claim: CAN see verification notes
+    app.dependency_overrides[get_current_user] = lambda: admin_auth
+    admin_claims = client.get("/api/admin/claims").json()
+    admin_claim_entry = next((c for c in admin_claims if c["id"] == claim_id), None)
+    assert admin_claim_entry is not None
+    assert "driver license ending with 9999" in str(admin_claim_entry["verification_notes"])
+
+
+def test_duplicate_notifications_are_prevented(
+    clean_test_db, mock_email_transport, user_a_auth, user_b_auth
+):
+    """TEST 13: Duplicate match evaluation must NOT dispatch duplicate in-app alerts or duplicate emails."""
+    client = TestClient(app)
+
+    create_test_student(user_a_auth, "Alice Owner", "2410990001")
+    create_test_student(user_b_auth, "Bob Finder", "2410990002")
+
+    app.dependency_overrides[get_current_user] = lambda: user_a_auth
+    lost_resp = client.post(
+        "/api/lost-items",
+        json={
+            "item_name": "Scientific Calculator",
+            "category": "Electronics",
+            "lost_date": "2026-09-20",
+            "approximate_location": "Math Lab",
+            "description": "Casio fx-991EX scientific calculator",
+        },
+    )
+    assert lost_resp.status_code == 201
+    lost_id = lost_resp.json()["id"]
+
+    app.dependency_overrides[get_current_user] = lambda: user_b_auth
+    found_resp = client.post(
+        "/api/found-items",
+        json={
+            "item_name": "Scientific Calculator",
+            "category": "Electronics",
+            "found_date": "2026-09-20",
+            "found_location": "Math Lab Desk",
+            "description": "Found Casio calculator",
+        },
+    )
+    assert found_resp.status_code == 201
+    found_id = found_resp.json()["id"]
+
+    assert len(mock_email_transport.sent_emails) == 1
+
+    # Re-evaluate matches for the found item
+    app.dependency_overrides[get_current_user] = lambda: user_b_auth
+    eval_resp = client.post("/api/matches/evaluate", json={"found_item_id": found_id})
+    assert eval_resp.status_code == 200
+
+    # Notification count should STILL be exactly 1 (no duplicate sent)
+    assert len(mock_email_transport.sent_emails) == 1
+
+    app.dependency_overrides[get_current_user] = lambda: user_a_auth
+    notifs = client.get("/api/notifications").json()["notifications"]
+    match_notifs = [n for n in notifs if n["type"] == "POSSIBLE_MATCH"]
+    assert len(match_notifs) == 1
+
+
+def test_unauthorized_user_cannot_create_or_view_another_users_claim(
+    clean_test_db, mock_email_transport, user_a_auth, user_b_auth
+):
+    """TEST 14: Third-party user cannot create a claim or view claim details for matches they don't own."""
+    client = TestClient(app)
+
+    user_c_auth = AuthenticatedUser(
+        uid="charlie-uid",
+        email="charlie@chitkara.edu.in",
+        email_verified=True,
+        role="STUDENT",
+    )
+
+    create_test_student(user_a_auth, "Alice Owner", "2410990001")
+    create_test_student(user_b_auth, "Bob Finder", "2410990002")
+    create_test_student(user_c_auth, "Charlie Outsider", "2410990003")
+
+    app.dependency_overrides[get_current_user] = lambda: user_a_auth
+    lost_resp = client.post(
+        "/api/lost-items",
+        json={
+            "item_name": "Black Backpack",
+            "category": "Bags",
+            "lost_date": "2026-09-20",
+            "approximate_location": "Library 2nd Floor",
+            "description": "Black laptop backpack with blue zipper",
+        },
+    )
+    assert lost_resp.status_code == 201
+    lost_id = lost_resp.json()["id"]
+
+    app.dependency_overrides[get_current_user] = lambda: user_b_auth
+    found_resp = client.post(
+        "/api/found-items",
+        json={
+            "item_name": "Black Backpack",
+            "category": "Bags",
+            "found_date": "2026-09-20",
+            "found_location": "Library Table",
+            "description": "Found black backpack",
+        },
+    )
+    assert found_resp.status_code == 201
+    found_id = found_resp.json()["id"]
+
+    with db.get_connection() as conn:
+        match_id = conn.execute("SELECT id FROM matches WHERE found_item_id = ?", (found_id,)).fetchone()["id"]
+
+    # User C attempts to create a claim on User A's match
+    app.dependency_overrides[get_current_user] = lambda: user_c_auth
+    unauth_create = client.post("/api/claims", json={"match_id": match_id, "verification_notes": "It is mine!"})
+    assert unauth_create.status_code == 403
+
+    # User A creates a valid claim
+    app.dependency_overrides[get_current_user] = lambda: user_a_auth
+    auth_create = client.post("/api/claims", json={"match_id": match_id, "verification_notes": "Real owner notes"})
+    assert auth_create.status_code == 201
+    claim_id = auth_create.json()["id"]
+
+    # User C attempts to view User A's claim
+    app.dependency_overrides[get_current_user] = lambda: user_c_auth
+    unauth_view = client.get(f"/api/claims/{claim_id}")
+    assert unauth_view.status_code == 403
 
 
 def test_foundry_failure_does_not_fabricate_successful_match(
@@ -730,3 +924,159 @@ def test_foundry_failure_does_not_fabricate_successful_match(
     with db.get_connection() as conn:
         row = conn.execute("SELECT analysis_status, ai_attributes_json FROM found_items WHERE id = ?", (found_id,)).fetchone()
         assert row["analysis_status"] in ("NOT_REQUESTED", "UNAVAILABLE", "FAILED")
+
+
+def test_admin_claims_queue_lifecycle_and_badge_count(clean_test_db, user_a_auth, user_b_auth, admin_auth):
+    """TEST: Admin claims badge count and active queue filtering."""
+    client = TestClient(app)
+
+    create_test_student(user_a_auth, "Alice Owner", "2410990001")
+    create_test_student(user_b_auth, "Bob Finder", "2410990002")
+
+    # 1. Initially 0 active claims
+    app.dependency_overrides[get_current_user] = lambda: admin_auth
+    overview_0 = client.get("/api/admin/overview").json()
+    assert overview_0["active_claims"] == 0
+
+    # Create Lost and Found items and match
+    app.dependency_overrides[get_current_user] = lambda: user_a_auth
+    lost_resp = client.post(
+        "/api/lost-items",
+        json={
+            "item_name": "HP Pavilion 15",
+            "category": "Laptops",
+            "lost_date": "2026-09-20",
+            "approximate_location": "Lab 1",
+            "description": "Silver HP laptop with charger",
+        },
+    )
+    lost_id = lost_resp.json()["id"]
+
+    app.dependency_overrides[get_current_user] = lambda: user_b_auth
+    found_resp = client.post(
+        "/api/found-items",
+        json={
+            "item_name": "HP Pavilion 15",
+            "category": "Laptops",
+            "found_date": "2026-09-20",
+            "found_location": "Lab 1",
+            "description": "Found silver HP pavilion laptop",
+        },
+    )
+    found_id = found_resp.json()["id"]
+
+    # Evaluate matches
+    app.dependency_overrides[get_current_user] = lambda: user_a_auth
+    matches_resp = client.get(f"/api/matches/lost/{lost_id}?refresh=true").json()
+    assert len(matches_resp["matches"]) == 1
+    match_id = matches_resp["matches"][0]["match_id"]
+
+    # 2. Submit Claim: active_claims becomes 1
+    claim_resp = client.post("/api/claims", json={"match_id": match_id, "claim_explanation": "My laptop", "verification_notes": "Serial 123"})
+    assert claim_resp.status_code == 201
+    claim_id = claim_resp.json()["id"]
+
+    app.dependency_overrides[get_current_user] = lambda: admin_auth
+    overview_1 = client.get("/api/admin/overview").json()
+    assert overview_1["active_claims"] == 1
+
+    # Active queue contains the claim
+    active_queue = client.get("/api/admin/claims").json()
+    assert any(c["id"] == claim_id for c in active_queue)
+
+    # 3. Approve claim: leaves active queue, decrements active count, historical claim remains in DB
+    override_resp = client.post(
+        f"/api/admin/claims/{claim_id}/override",
+        json={"new_status": "APPROVED", "admin_notes": "Claim verified and approved by admin."},
+    )
+    assert override_resp.status_code == 200
+
+    overview_after = client.get("/api/admin/overview").json()
+    assert overview_after["active_claims"] == 0
+    assert overview_after["approved_claims"] == 1
+
+    # Active queue now excludes the approved claim
+    active_queue_after = client.get("/api/admin/claims").json()
+    assert not any(c["id"] == claim_id for c in active_queue_after)
+
+    # All claims query still retains the claim for history and audit
+    all_claims = client.get("/api/admin/claims?status=all").json()
+    assert any(c["id"] == claim_id and c["status"] == "APPROVED" for c in all_claims)
+
+    # Record exists in SQLite
+    with db.get_connection() as conn:
+        db_claim = conn.execute("SELECT status FROM claims WHERE id = ?", (claim_id,)).fetchone()
+        assert db_claim["status"] == "APPROVED"
+
+
+def test_closed_item_match_exclusion_and_historical_preservation(clean_test_db, user_a_auth, user_b_auth, admin_auth):
+    """TEST: Closed/returned items excluded from candidate retrieval and active match results."""
+    from app.services.candidate_service import CandidateFilter, retrieve_candidates
+    from app.services.notification_service import notify_possible_match
+    client = TestClient(app)
+
+    create_test_student(user_a_auth, "Alice Owner", "2410990001")
+    create_test_student(user_b_auth, "Bob Finder", "2410990002")
+
+    # 1. Create Lost and Found items
+    app.dependency_overrides[get_current_user] = lambda: user_a_auth
+    lost_resp = client.post(
+        "/api/lost-items",
+        json={
+            "item_name": "Black Umbrella",
+            "category": "Accessories",
+            "lost_date": "2026-09-20",
+            "approximate_location": "Gate 2",
+            "description": "Black folding umbrella",
+        },
+    )
+    lost_id = lost_resp.json()["id"]
+
+    app.dependency_overrides[get_current_user] = lambda: user_b_auth
+    found_resp = client.post(
+        "/api/found-items",
+        json={
+            "item_name": "Black Umbrella",
+            "category": "Accessories",
+            "found_date": "2026-09-20",
+            "found_location": "Gate 2",
+            "description": "Black folding umbrella found at gate",
+        },
+    )
+    found_id = found_resp.json()["id"]
+
+    # Initial active matching succeeds
+    app.dependency_overrides[get_current_user] = lambda: user_a_auth
+    matches_init = client.get(f"/api/matches/lost/{lost_id}?refresh=true").json()
+    assert len(matches_init["matches"]) == 1
+    match_id = matches_init["matches"][0]["match_id"]
+
+    # 2. Close the Lost item
+    app.dependency_overrides[get_current_user] = lambda: admin_auth
+    client.patch(f"/api/admin/lost-items/{lost_id}/status", json={"status": "CLOSED", "reason": "Owner found item"})
+
+    # Candidate retrieval excludes closed lost item
+    cand_res = retrieve_candidates(found_id, CandidateFilter(category="Accessories"))
+    assert not any(c["id"] == lost_id for c in cand_res["candidates"])
+
+    # Lost owner match query returns empty with inactive message
+    app.dependency_overrides[get_current_user] = lambda: user_a_auth
+    matches_closed_lost = client.get(f"/api/matches/lost/{lost_id}").json()
+    assert len(matches_closed_lost["matches"]) == 0
+    assert "no longer active" in matches_closed_lost.get("message", "")
+
+    # Finder match query also excludes closed candidate
+    app.dependency_overrides[get_current_user] = lambda: user_b_auth
+    found_matches = client.get(f"/api/matches/found/{found_id}").json()
+    assert len(found_matches["matches"]) == 0
+
+    # Notifications are NOT generated for closed items
+    lost_item_row = repositories.get_lost_item(lost_id)
+    found_item_row = repositories.get_found_item(found_id)
+    notif_res = notify_possible_match(lost_item_row, found_item_row, MagicMock(score=0.95))
+    assert notif_res is None
+
+    # Historical match record is NOT deleted
+    with db.get_connection() as conn:
+        match_db_row = conn.execute("SELECT id, score FROM matches WHERE id = ?", (match_id,)).fetchone()
+        assert match_db_row is not None

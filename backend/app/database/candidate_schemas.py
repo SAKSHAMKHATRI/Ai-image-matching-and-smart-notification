@@ -85,4 +85,5 @@ class MatchSearchResponse(BaseModel):
     possible_matches_count: int
     low_confidence_count: int
     disclaimer: str
+    message: str | None = None
 

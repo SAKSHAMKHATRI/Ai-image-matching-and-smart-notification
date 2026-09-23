@@ -229,22 +229,27 @@ export function MatchResultsView({ foundItem, lostItem, lostItemId, onBack }: Ma
           {/* Empty State Fallback */}
           {matches.length === 0 ? (
             <div className="empty-matches-card" data-testid="empty-matches">
-              <div className="empty-icon">🔍</div>
+              <div className="empty-icon">{data?.message ? "🔒" : "🔍"}</div>
               <h3>
-                {isLostView
-                  ? "No matching found items discovered yet"
-                  : "No matching lost items found"}
+                {data?.message ||
+                  (isLostView
+                    ? "No matching found items discovered yet"
+                    : "No matching lost items found")}
               </h3>
               <p>
-                {isLostView
+                {data?.message
+                  ? "This match is no longer active because the item report has been resolved, matched, or closed."
+                  : isLostView
                   ? "We could not find any active found-item reports matching this lost item's category, location, or visual attributes."
                   : "We could not find any active lost-item reports matching this found item's category, location, or visual attributes."}
               </p>
-              <p className="sub-text">
-                {isLostView
-                  ? "When someone reports a found item matching your report, it will automatically appear here."
-                  : "When students report newly lost items matching this report, they will automatically be evaluated here."}
-              </p>
+              {!data?.message && (
+                <p className="sub-text">
+                  {isLostView
+                    ? "When someone reports a found item matching your report, it will automatically appear here."
+                    : "When students report newly lost items matching this report, they will automatically be evaluated here."}
+                </p>
+              )}
             </div>
           ) : filteredMatches.length === 0 ? (
             <div className="empty-matches-card">

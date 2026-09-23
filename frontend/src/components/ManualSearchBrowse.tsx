@@ -398,6 +398,9 @@ export function ManualSearchBrowse({
                     📍 {item.campus ? `${item.campus} — ` : ""}
                     {item.found_location || "Location not specified"}
                   </p>
+                  <p className="item-finder" style={{ fontSize: "0.85rem", color: "#4b5563", margin: "0.25rem 0" }}>
+                    👤 <strong>Found by:</strong> {item.found_by || item.finder_name || "Campus Student"}
+                  </p>
                   {item.description && (
                     <p className="item-description">{item.description}</p>
                   )}

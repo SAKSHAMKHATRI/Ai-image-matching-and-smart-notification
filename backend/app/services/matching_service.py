@@ -42,6 +42,18 @@ def evaluate_and_persist_matches_for_found_item(
         filters = CandidateFilter()
 
     found_item_id = found_item["id"]
+    if found_item.get("status") in ("RETURNED", "CLOSED"):
+        return {
+            "found_item_id": found_item_id,
+            "matches": [],
+            "total_matches": 0,
+            "strong_matches_count": 0,
+            "possible_matches_count": 0,
+            "low_confidence_count": 0,
+            "disclaimer": DISCLAIMER_TEXT,
+            "message": "This match is no longer active.",
+        }
+
     candidate_result = retrieve_candidates(found_item_id, filters)
     candidates = candidate_result.get("candidates", [])
 
@@ -54,7 +66,7 @@ def evaluate_and_persist_matches_for_found_item(
         lost_id = candidate["id"]
         # Fetch full lost item record to access embedding blobs for scoring
         lost_item_full = repositories.get_lost_item(lost_id)
-        if not lost_item_full:
+        if not lost_item_full or lost_item_full.get("status") != "ACTIVE":
             continue
 
         score_result = compute_match_score(found_item, lost_item_full)
@@ -123,12 +135,15 @@ def evaluate_and_persist_matches_for_lost_item(
     lost_item: dict[str, Any],
 ) -> None:
     """Evaluate active found items against a lost item and persist match results."""
+    if lost_item.get("status") in ("MATCHED", "RETURNED", "CLOSED"):
+        return
+
     lost_item_id = lost_item["id"]
     found_items, _ = repositories.search_public_found_items(limit=100)
 
     for found_item_summary in found_items:
         found_item_full = repositories.get_found_item(found_item_summary["id"])
-        if not found_item_full:
+        if not found_item_full or found_item_full.get("status") in ("RETURNED", "CLOSED"):
             continue
 
         score_result = compute_match_score(found_item_full, lost_item)
@@ -152,6 +167,19 @@ def get_lost_item_matches_response(
     """Retrieve persisted and scored match results for a lost item owner."""
     lost_item_id = lost_item["id"]
 
+    # If lost item itself is closed / matched / returned, return no active matches
+    if lost_item.get("status") in ("MATCHED", "RETURNED", "CLOSED"):
+        return {
+            "lost_item_id": lost_item_id,
+            "matches": [],
+            "total_matches": 0,
+            "strong_matches_count": 0,
+            "possible_matches_count": 0,
+            "low_confidence_count": 0,
+            "disclaimer": DISCLAIMER_TEXT,
+            "message": "This match is no longer active.",
+        }
+
     # 1. If refresh requested or no matches in DB, evaluate against active found items
     matches_db = repositories.get_matches_for_lost_item(lost_item_id)
     if refresh or not matches_db:
@@ -164,8 +192,11 @@ def get_lost_item_matches_response(
     low_count = 0
 
     for match in matches_db:
+        if match.get("status") in ("REJECTED", "CLOSED", "INACTIVE"):
+            continue
+
         found_item = repositories.get_found_item(match["found_item_id"])
-        if not found_item:
+        if not found_item or found_item.get("status") in ("RETURNED", "CLOSED"):
             continue
 
         explanation: dict[str, Any] = {}
@@ -243,4 +274,5 @@ def get_lost_item_matches_response(
         "possible_matches_count": possible_count,
         "low_confidence_count": low_count,
         "disclaimer": DISCLAIMER_TEXT,
+        "message": "This match is no longer active." if not scored_matches and matches_db else None,
     }

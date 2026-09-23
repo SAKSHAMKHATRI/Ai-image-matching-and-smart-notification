@@ -136,6 +136,7 @@ export type MatchSearchResponse = {
   possible_matches_count: number;
   low_confidence_count: number;
   disclaimer: string;
+  message?: string | null;
 };
 
 
@@ -976,6 +977,8 @@ export type PublicFoundItem = {
   description: string | null;
   distinctive_features: string | null;
   image_reference: string | null;
+  found_by?: string | null;
+  finder_name?: string | null;
   created_at: string;
 };
 

@@ -260,6 +260,10 @@ def notify_possible_match(
         return None
     lost_id = lost_item["id"]
 
+    # Do not notify for inactive, returned, or closed items
+    if lost_item.get("status") in ("MATCHED", "RETURNED", "CLOSED") or found_item.get("status") in ("RETURNED", "CLOSED"):
+        return None
+
     # Only notify on eligible matches (score >= 0.30 or not low confidence)
     from app.services.scoring_service import MatchClassification
 

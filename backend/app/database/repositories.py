@@ -583,7 +583,7 @@ def search_public_found_items(
         paginated_params = list(params) + [limit, offset]
         rows = connection.execute(
             f"SELECT id, status, found_at, location, campus, item_name, category, color, brand, "
-            f"description, distinctive_features, image_reference, created_at "
+            f"description, distinctive_features, image_reference, created_at, user_id "
             f"FROM found_items WHERE {where_clause} ORDER BY created_at DESC LIMIT ? OFFSET ?",
             paginated_params,
         ).fetchall()

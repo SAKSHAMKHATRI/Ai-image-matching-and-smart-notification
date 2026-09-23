@@ -39,6 +39,7 @@ export function AdminDashboard({ onBack }: AdminDashboardProps) {
   const [lostList, setLostList] = useState<LostItem[]>([]);
   const [foundList, setFoundList] = useState<FoundItem[]>([]);
   const [claimsList, setClaimsList] = useState<Array<Record<string, unknown>>>([]);
+  const [claimFilter, setClaimFilter] = useState<"ACTIVE" | "ALL">("ACTIVE");
   const [auditLogs, setAuditLogs] = useState<AdminAuditLogEntry[]>([]);
 
   // Override Modal state
@@ -54,13 +55,14 @@ export function AdminDashboard({ onBack }: AdminDashboardProps) {
 
     try {
       const token = await user.getIdToken();
+      const claimsPromise = claimFilter === "ALL" ? getAdminClaims(token, "ALL") : getAdminClaims(token);
       const [overviewData, usersData, lostData, foundData, claimsData, auditData] =
         await Promise.all([
           getAdminOverview(token),
           getAdminUsers(token),
           getAdminLostItems(token),
           getAdminFoundItems(token),
-          getAdminClaims(token),
+          claimsPromise,
           getAdminAuditLogs(token, { limit: "50" }),
         ]);
 
@@ -83,7 +85,7 @@ export function AdminDashboard({ onBack }: AdminDashboardProps) {
 
   useEffect(() => {
     void loadData();
-  }, [user]);
+  }, [user, claimFilter]);
 
   async function handleToggleUserStatus(userId: number, currentStatus: string) {
     if (!user) return;
@@ -207,7 +209,7 @@ export function AdminDashboard({ onBack }: AdminDashboardProps) {
           onClick={() => setTab("disputes")}
           type="button"
         >
-          ⚖️ Disputes &amp; Claims ({stats?.disputed_claims ?? 0})
+          ⚖️ Disputes &amp; Claims ({stats?.active_claims ?? 0})
         </button>
         <button
           className={tab === "lost" ? "selected" : ""}
@@ -273,8 +275,32 @@ export function AdminDashboard({ onBack }: AdminDashboardProps) {
       {/* TAB 2: CLAIMS & DISPUTES */}
       {tab === "disputes" && (
         <div className="admin-table-container">
-          <h3>Claims &amp; Escalated Disputes</h3>
-          <p className="section-note">Review active claims and mediate disputes flagged for administrator review.</p>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1rem", flexWrap: "wrap", gap: "0.5rem" }}>
+            <div>
+              <h3 style={{ margin: 0 }}>Claims &amp; Escalated Disputes</h3>
+              <p className="section-note" style={{ margin: "0.25rem 0 0 0" }}>
+                {claimFilter === "ACTIVE"
+                  ? "Showing active claims requiring administrator action or mediation."
+                  : "Showing all platform claims including historical and resolved cases."}
+              </p>
+            </div>
+            <div className="filter-chips">
+              <button
+                type="button"
+                className={`chip ${claimFilter === "ACTIVE" ? "active" : ""}`}
+                onClick={() => setClaimFilter("ACTIVE")}
+              >
+                Active Queue ({stats?.active_claims ?? 0})
+              </button>
+              <button
+                type="button"
+                className={`chip ${claimFilter === "ALL" ? "active" : ""}`}
+                onClick={() => setClaimFilter("ALL")}
+              >
+                All History ({stats?.total_claims ?? 0})
+              </button>
+            </div>
+          </div>
           {claimsList.length === 0 ? (
             <p className="profile-note">No claims recorded yet.</p>
           ) : (

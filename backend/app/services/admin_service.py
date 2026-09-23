@@ -65,7 +65,10 @@ def get_admin_overview_stats() -> dict[str, int]:
         # Claims counts
         total_claims = connection.execute("SELECT COUNT(*) FROM claims").fetchone()[0]
         active_claims = connection.execute(
-            "SELECT COUNT(*) FROM claims WHERE status IN ('CLAIM_REQUESTED', 'OWNER_VERIFICATION')"
+            """
+            SELECT COUNT(*) FROM claims
+            WHERE status NOT IN ('APPROVED', 'REJECTED', 'RETURNED', 'CLOSED')
+            """
         ).fetchone()[0]
         disputed_claims = connection.execute(
             "SELECT COUNT(*) FROM claims WHERE status = 'ADMIN_REVIEW'"
@@ -446,9 +449,12 @@ def get_all_claims_admin(
     conditions = ["1=1"]
     params: list[Any] = []
 
-    if status:
+    if status and status.upper() != "ALL":
         conditions.append("c.status = ?")
         params.append(status.upper())
+    elif not status:
+        # Default to active claims queue (leaves out resolved/approved/rejected/returned/closed claims)
+        conditions.append("c.status NOT IN ('APPROVED', 'REJECTED', 'RETURNED', 'CLOSED')")
 
     where_clause = " AND ".join(conditions)
     query = f"""
