@@ -329,6 +329,7 @@ def get_claims_by_user(user_id: int) -> list[dict[str, Any]]:
             """
             SELECT DISTINCT c.*, m.found_item_id, m.lost_item_id, m.score,
                    l.item_name as lost_item_name, l.category as lost_category,
+                   f.item_name as found_item_name, f.category as found_category,
                    l.user_id as lost_owner_id, f.user_id as found_finder_id
             FROM claims c
             JOIN matches m ON c.match_id = m.id

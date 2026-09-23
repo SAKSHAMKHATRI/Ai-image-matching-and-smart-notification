@@ -47,6 +47,7 @@ def request_claim(
     claimant_user_id: int,
     match_id: int,
     verification_notes: str | None = None,
+    claim_explanation: str | None = None,
 ) -> dict[str, Any]:
     """Initiate a claim request on a suggested match with optional verification notes.
 
@@ -81,6 +82,14 @@ def request_claim(
             "One of the items in this match is already part of an active claim."
         )
 
+    # Combine claim explanation and private verification notes if provided
+    notes_parts: list[str] = []
+    if claim_explanation and claim_explanation.strip():
+        notes_parts.append(f"Explanation: {claim_explanation.strip()}")
+    if verification_notes and verification_notes.strip():
+        notes_parts.append(f"Verification Answer: {verification_notes.strip()}")
+    combined_notes = "\n\n".join(notes_parts) if notes_parts else None
+
     with db.get_connection() as connection:
         # Create claim record
         cursor = connection.execute(
@@ -93,7 +102,7 @@ def request_claim(
                 match_id,
                 claimant_user_id,
                 ClaimStatus.CLAIM_REQUESTED.value,
-                verification_notes,
+                combined_notes,
             ),
         )
         claim_row = cursor.fetchone()
@@ -118,7 +127,7 @@ def request_claim(
                     {
                         "match_id": match_id,
                         "status": ClaimStatus.CLAIM_REQUESTED.value,
-                        "has_verification_notes": bool(verification_notes),
+                        "has_verification_notes": bool(combined_notes),
                     }
                 ),
             ),
@@ -144,16 +153,31 @@ def get_user_claims(user_id: int) -> list[dict[str, Any]]:
     raw_claims = repositories.get_claims_by_user(user_id)
     results: list[dict[str, Any]] = []
     for c in raw_claims:
+        # Safe display name of claimant
+        claimant_user = db.get_user_record(c["claimant_user_id"])
+        claimant_name = "Student"
+        if claimant_user:
+            claimant_name = claimant_user.get("display_name") or "Student"
+            if not claimant_user.get("display_name") and claimant_user.get("firebase_uid"):
+                p = db.get_profile(claimant_user["firebase_uid"])
+                if p and p.get("full_name"):
+                    claimant_name = str(p["full_name"])
+
         results.append(
             {
                 "id": c["id"],
                 "match_id": c["match_id"],
                 "claimant_user_id": c["claimant_user_id"],
+                "claimant_name": claimant_name,
                 "status": c["status"],
-                "verification_notes": c.get("verification_notes"),
+                # Privacy rule: private verification notes are strictly confidential to the claimant and admin
+                "verification_notes": c.get("verification_notes") if c["claimant_user_id"] == user_id else None,
                 "found_item_id": c.get("found_item_id"),
                 "lost_item_id": c.get("lost_item_id"),
                 "item_name": c.get("lost_item_name", "Lost Item"),
+                "found_item_name": c.get("found_item_name", "Found Item"),
+                "lost_item_name": c.get("lost_item_name", "Lost Item"),
+                "is_finder": c.get("found_finder_id") == user_id,
                 "category": c.get("lost_category"),
                 "score": c.get("score"),
                 "created_at": c["created_at"],
@@ -256,12 +280,19 @@ def get_claim_detail(
         "distinctive_features": found_item.get("distinctive_features"),
     }
 
+    # Safe display name of claimant and finder
+    from app.services.notification_service import get_user_display_name
+    claimant_name = get_user_display_name(claim["claimant_user_id"])
+    finder_name = get_user_display_name(found_item["user_id"])
+
     return {
         "id": claim["id"],
         "match_id": claim["match_id"],
         "claimant_user_id": claim["claimant_user_id"],
+        "claimant_name": claimant_name,
+        "finder_name": finder_name,
         "status": claim["status"],
-        "verification_notes": claim.get("verification_notes"),
+        "verification_notes": claim.get("verification_notes") if (is_admin or is_claimant) else None,
         "user_role": user_role,
         "can_approve": can_approve,
         "can_reject": can_reject,
@@ -385,6 +416,7 @@ def process_claim_decision(
             claim_id=claim_id,
             new_status=new_status,
             claimant_user_id=claim["claimant_user_id"],
+            finder_user_id=found_item.get("user_id"),
         )
     except Exception as exc:
         logger.warning("Failed to dispatch claim decision notification: %s", exc)
@@ -659,6 +691,7 @@ def admin_override_claim(
             claim_id=claim_id,
             new_status=status_str,
             claimant_user_id=claim["claimant_user_id"],
+            finder_user_id=found_item.get("user_id") if found_item else None,
         )
     except Exception as exc:
         logger.warning("Failed to dispatch admin claim status notification: %s", exc)

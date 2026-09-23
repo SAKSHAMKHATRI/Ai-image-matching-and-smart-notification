@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { useAuth } from "../auth/AuthContext";
 import {
   ApiError,
+  createClaim,
   evaluateMatches,
   getLostItemMatches,
   type FoundItem,
@@ -28,6 +29,14 @@ export function MatchResultsView({ foundItem, lostItem, lostItemId, onBack }: Ma
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<FilterCategory>("all");
   const [selectedMatch, setSelectedMatch] = useState<ScoredMatchItem | null>(null);
+
+  // Claim modal state
+  const [claimingMatch, setClaimingMatch] = useState<ScoredMatchItem | null>(null);
+  const [claimExplanation, setClaimExplanation] = useState("");
+  const [verificationNotes, setVerificationNotes] = useState("");
+  const [submittingClaim, setSubmittingClaim] = useState(false);
+  const [claimSuccessMessage, setClaimSuccessMessage] = useState<string | null>(null);
+  const [claimErrorMessage, setClaimErrorMessage] = useState<string | null>(null);
 
   const targetLostId = lostItem?.id ?? lostItemId ?? null;
   const isLostView = Boolean(targetLostId);
@@ -56,6 +65,37 @@ export function MatchResultsView({ foundItem, lostItem, lostItemId, onBack }: Ma
     } finally {
       setLoading(false);
       setEvaluating(false);
+    }
+  }
+
+  function handleOpenClaim(match: ScoredMatchItem) {
+    setClaimingMatch(match);
+    setClaimSuccessMessage(null);
+    setClaimErrorMessage(null);
+    setClaimExplanation("");
+    setVerificationNotes("");
+  }
+
+  async function handleSubmitClaim(e: React.FormEvent) {
+    e.preventDefault();
+    if (!user || !claimingMatch) return;
+    const matchId = claimingMatch.match_id || claimingMatch.id;
+    if (!matchId) return;
+
+    setSubmittingClaim(true);
+    setClaimErrorMessage(null);
+
+    try {
+      const token = await user.getIdToken();
+      await createClaim(token, matchId, verificationNotes, claimExplanation);
+      setClaimSuccessMessage("Claim submitted successfully. Your claim is under review.");
+      void loadMatches(false);
+    } catch (err) {
+      setClaimErrorMessage(
+        err instanceof ApiError ? err.message : "Failed to submit claim. Please try again."
+      );
+    } finally {
+      setSubmittingClaim(false);
     }
   }
 
@@ -244,11 +284,16 @@ export function MatchResultsView({ foundItem, lostItem, lostItemId, onBack }: Ma
                     >
                       <div className="match-card-header">
                         <div className="match-title-area">
-                          <span className="lost-tag">
-                            {isLostView
-                              ? `Found Report #${match.found_item_id || match.id}`
-                              : `Lost Report #${match.lost_item_id || match.id}`}
-                          </span>
+                          <div style={{ display: "flex", gap: "6px", alignItems: "center", flexWrap: "wrap" }}>
+                            {isLostView && (
+                              <span className="lost-tag" style={{ background: "#e0f2fe", color: "#0369a1", fontWeight: 700 }}>
+                                Possible Match
+                              </span>
+                            )}
+                            <span className="lost-tag">
+                              {isLostView ? `Found Report #${match.found_item_id || match.id}` : `Lost Report #${match.lost_item_id || match.id}`}
+                            </span>
+                          </div>
                           <h3 className="match-item-name">{match.item_name}</h3>
                         </div>
                         <div className={`score-badge ${getBadgeClass(match.classification)}`}>
@@ -281,6 +326,12 @@ export function MatchResultsView({ foundItem, lostItem, lostItemId, onBack }: Ma
                           <div>
                             <dt>Campus</dt>
                             <dd>{match.campus}</dd>
+                          </div>
+                        )}
+                        {isLostView && (
+                          <div>
+                            <dt>Found by</dt>
+                            <dd>{match.finder_name || match.found_by || "Campus Student"}</dd>
                           </div>
                         )}
                         {(match.found_location || match.approximate_location) && (
@@ -323,7 +374,18 @@ export function MatchResultsView({ foundItem, lostItem, lostItemId, onBack }: Ma
                       )}
 
                       {/* Action buttons */}
-                      <div className="match-card-actions">
+                      <div className="match-card-actions" style={{ display: "flex", gap: "0.75rem", flexWrap: "wrap", marginTop: "1rem" }}>
+                        {isLostView && (
+                          <button
+                            className="primary-button claim-mine-btn"
+                            onClick={() => handleOpenClaim(match)}
+                            type="button"
+                            data-testid={`claim-mine-btn-${cardId}`}
+                            style={{ background: "#0284c7", color: "#fff", fontWeight: 600, padding: "0.5rem 1rem", borderRadius: "6px" }}
+                          >
+                            I Believe This Is Mine
+                          </button>
+                        )}
                         <button
                           className="secondary-button detail-btn"
                           onClick={() => setSelectedMatch(match)}
@@ -442,16 +504,48 @@ export function MatchResultsView({ foundItem, lostItem, lostItemId, onBack }: Ma
                 </p>
                 <dl className="meta-list">
                   <div>
-                    <dt>Report ID</dt>
+                    <dt>Status</dt>
                     <dd>
-                      {isLostView
-                        ? `Found #${selectedMatch.found_item_id || selectedMatch.id}`
-                        : `Lost #${selectedMatch.lost_item_id || selectedMatch.id}`}
+                      <span className="possible-match-badge" style={{ background: "#e0f2fe", color: "#0369a1", padding: "2px 8px", borderRadius: "4px", fontWeight: 600 }}>
+                        Possible Match
+                      </span>
+                    </dd>
+                  </div>
+                  {isLostView && (
+                    <div>
+                      <dt>Lost Item</dt>
+                      <dd><strong>{selectedMatch.lost_item_name || lostItem?.item_name || "Your Lost Item"}</strong></dd>
+                    </div>
+                  )}
+                  <div>
+                    <dt>{isLostView ? "Found Item" : "Item Name"}</dt>
+                    <dd><strong>{selectedMatch.item_name}</strong></dd>
+                  </div>
+                  {isLostView && (
+                    <div>
+                      <dt>Found by</dt>
+                      <dd>{selectedMatch.finder_name || selectedMatch.found_by || "Campus Student"}</dd>
+                    </div>
+                  )}
+                  <div>
+                    <dt>{isLostView ? "Found Near" : "Location"}</dt>
+                    <dd>
+                      {selectedMatch.found_location ||
+                        selectedMatch.approximate_location ||
+                        "Campus Ground"}
                     </dd>
                   </div>
                   <div>
-                    <dt>Item Name</dt>
-                    <dd>{selectedMatch.item_name}</dd>
+                    <dt>{isLostView ? "Date Found" : "Date Lost"}</dt>
+                    <dd>
+                      {selectedMatch.found_date ||
+                        selectedMatch.lost_date ||
+                        "Not specified"}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>Match Score</dt>
+                    <dd style={{ color: "#0284c7", fontWeight: 700 }}>{selectedMatch.score_percent}%</dd>
                   </div>
                   <div>
                     <dt>Category</dt>
@@ -461,27 +555,28 @@ export function MatchResultsView({ foundItem, lostItem, lostItemId, onBack }: Ma
                     <dt>Campus</dt>
                     <dd>{selectedMatch.campus || "Not specified"}</dd>
                   </div>
-                  <div>
-                    <dt>Location</dt>
-                    <dd>
-                      {selectedMatch.found_location ||
-                        selectedMatch.approximate_location ||
-                        "Not specified"}
-                    </dd>
-                  </div>
-                  <div>
-                    <dt>{isLostView ? "Found Date" : "Lost Date"}</dt>
-                    <dd>
-                      {selectedMatch.found_date ||
-                        selectedMatch.lost_date ||
-                        "Not specified"}
-                    </dd>
-                  </div>
                 </dl>
               </div>
             </div>
 
-            <div className="modal-footer">
+            <div className="modal-footer" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div>
+                {isLostView && (
+                  <button
+                    className="primary-button claim-mine-btn"
+                    onClick={() => {
+                      const matchToClaim = selectedMatch;
+                      setSelectedMatch(null);
+                      handleOpenClaim(matchToClaim);
+                    }}
+                    type="button"
+                    data-testid="claim-mine-modal-btn"
+                    style={{ background: "#0284c7", color: "#fff", fontWeight: 600, padding: "0.5rem 1rem", borderRadius: "6px" }}
+                  >
+                    I Believe This Is Mine
+                  </button>
+                )}
+              </div>
               <button
                 className="secondary-button"
                 onClick={() => setSelectedMatch(null)}
@@ -489,6 +584,140 @@ export function MatchResultsView({ foundItem, lostItem, lostItemId, onBack }: Ma
               >
                 Close
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Claim Form Modal */}
+      {claimingMatch && (
+        <div
+          className="modal-backdrop"
+          onClick={() => setClaimingMatch(null)}
+          role="dialog"
+          aria-modal="true"
+        >
+          <div
+            className="modal-content match-detail-modal"
+            onClick={(e) => e.stopPropagation()}
+            style={{ maxWidth: "540px" }}
+          >
+            <div className="modal-header">
+              <div>
+                <h3 style={{ margin: 0 }}>Claim Verification Form</h3>
+                <span style={{ fontSize: "0.85rem", color: "#0284c7", fontWeight: 600 }}>
+                  I Believe This Is Mine — {claimingMatch.item_name}
+                </span>
+              </div>
+              <button
+                className="close-btn"
+                onClick={() => setClaimingMatch(null)}
+                type="button"
+                aria-label="Close claim modal"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="modal-body" style={{ padding: "1.5rem" }}>
+              {claimSuccessMessage ? (
+                <div className="claim-success-card" style={{ padding: "1.5rem 1rem", textAlign: "center" }}>
+                  <div style={{ fontSize: "2.5rem", marginBottom: "0.5rem" }}>✅</div>
+                  <h4 style={{ color: "#059669", margin: "0 0 0.75rem 0", fontSize: "1.2rem" }}>
+                    Claim Submitted
+                  </h4>
+                  <p style={{ margin: 0, fontSize: "1.05rem", color: "#1f2937", fontWeight: 500 }}>
+                    {claimSuccessMessage}
+                  </p>
+                  <p style={{ fontSize: "0.875rem", color: "#6b7280", marginTop: "0.75rem" }}>
+                    Our campus administration team has been notified. You can track this claim status in your dashboard.
+                  </p>
+                </div>
+              ) : (
+                <form onSubmit={handleSubmitClaim} id="claim-verification-form">
+                  <p style={{ fontSize: "0.9rem", color: "#4b5563", marginTop: 0, marginBottom: "1.25rem" }}>
+                    Please submit proof of ownership for <strong>{claimingMatch.item_name}</strong>. Your explanation and private details will be reviewed for verification.
+                  </p>
+
+                  {claimErrorMessage && (
+                    <div style={{ marginBottom: "1rem", padding: "0.75rem", background: "#fef2f2", color: "#b91c1c", borderRadius: "6px", fontSize: "0.9rem" }}>
+                      {claimErrorMessage}
+                    </div>
+                  )}
+
+                  <div className="form-group" style={{ marginBottom: "1.25rem" }}>
+                    <label htmlFor="claim-explanation" style={{ display: "block", fontWeight: 600, fontSize: "0.9rem", marginBottom: "0.4rem" }}>
+                      1. Claim Explanation *
+                    </label>
+                    <textarea
+                      id="claim-explanation"
+                      className="form-textarea"
+                      rows={3}
+                      required
+                      value={claimExplanation}
+                      onChange={(e) => setClaimExplanation(e.target.value)}
+                      placeholder="Explain why you believe this found item belongs to you (circumstances, timeline, visual match)..."
+                      style={{ width: "100%", padding: "0.6rem", borderRadius: "6px", border: "1px solid #d1d5db", boxSizing: "border-box" }}
+                    />
+                  </div>
+
+                  <div className="form-group" style={{ marginBottom: "0.5rem" }}>
+                    <label htmlFor="verification-notes" style={{ display: "block", fontWeight: 600, fontSize: "0.9rem", marginBottom: "0.4rem" }}>
+                      2. Private Identifying Detail / Verification Answer *
+                    </label>
+                    <textarea
+                      id="verification-notes"
+                      className="form-textarea"
+                      rows={3}
+                      required
+                      value={verificationNotes}
+                      onChange={(e) => setVerificationNotes(e.target.value)}
+                      placeholder="Provide confidential private proof (e.g., serial number, hidden mark, interior contents, unique scratch or sticker)..."
+                      style={{ width: "100%", padding: "0.6rem", borderRadius: "6px", border: "1px solid #d1d5db", boxSizing: "border-box" }}
+                    />
+                    <div style={{ display: "flex", alignItems: "flex-start", gap: "0.4rem", marginTop: "0.5rem", background: "#f0fdf4", border: "1px solid #bbf7d0", padding: "0.5rem 0.75rem", borderRadius: "6px" }}>
+                      <span style={{ fontSize: "1rem" }}>🔒</span>
+                      <p style={{ fontSize: "0.8rem", color: "#166534", margin: 0 }}>
+                        <strong>Strict Privacy:</strong> This verification answer is stored securely and is <strong>NEVER visible to the Finder</strong>. Only administrators can review it.
+                      </p>
+                    </div>
+                  </div>
+                </form>
+              )}
+            </div>
+
+            <div className="modal-footer" style={{ display: "flex", justifyContent: "flex-end", gap: "0.75rem", padding: "1rem 1.5rem", borderTop: "1px solid #e5e7eb" }}>
+              {claimSuccessMessage ? (
+                <button
+                  className="primary-button"
+                  onClick={() => setClaimingMatch(null)}
+                  type="button"
+                  style={{ background: "#0284c7", color: "#fff", fontWeight: 600, padding: "0.5rem 1.25rem", borderRadius: "6px" }}
+                >
+                  Done
+                </button>
+              ) : (
+                <>
+                  <button
+                    className="secondary-button"
+                    disabled={submittingClaim}
+                    onClick={() => setClaimingMatch(null)}
+                    type="button"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    className="primary-button"
+                    disabled={submittingClaim || !claimExplanation.trim() || !verificationNotes.trim()}
+                    form="claim-verification-form"
+                    type="submit"
+                    data-testid="submit-claim-btn"
+                    style={{ background: "#0284c7", color: "#fff", fontWeight: 600, padding: "0.5rem 1.25rem", borderRadius: "6px" }}
+                  >
+                    {submittingClaim ? "Submitting Claim..." : "Submit Claim"}
+                  </button>
+                </>
+              )}
             </div>
           </div>
         </div>

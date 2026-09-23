@@ -187,13 +187,26 @@ def get_lost_item_matches_response(
             classification = "LOW_CONFIDENCE"
             low_count += 1
 
+        finder_id = found_item.get("user_id")
+        finder_name = "Campus Student"
+        if finder_id:
+            try:
+                from app.services.notification_service import get_user_display_name
+
+                finder_name = get_user_display_name(finder_id)
+            except Exception:
+                finder_name = "Campus Student"
+
         scored_item = {
             "id": found_item["id"],
             "found_item_id": found_item["id"],
             "lost_item_id": lost_item_id,
+            "lost_item_name": lost_item.get("item_name"),
             "match_id": match["id"],
             "status": found_item.get("status", "REPORTED"),
             "item_name": found_item.get("item_name") or found_item.get("category") or "Found Item",
+            "finder_name": finder_name,
+            "found_by": finder_name,
             "category": found_item.get("category"),
             "color": found_item.get("color"),
             "brand": found_item.get("brand"),

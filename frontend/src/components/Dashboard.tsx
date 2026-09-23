@@ -3,10 +3,12 @@ import { useEffect, useState } from "react";
 import { useAuth } from "../auth/AuthContext";
 import {
   ApiError,
+  getMyClaims,
   getMyFoundItems,
   getMyLostItems,
   getMyProfile,
   getNotifications,
+  type ClaimSummary,
   type FoundItem,
   type LostItem,
   type StudentProfile,
@@ -38,6 +40,7 @@ export function Dashboard({
   const [profile, setProfile] = useState<StudentProfile | null>(null);
   const [lostItems, setLostItems] = useState<LostItem[]>([]);
   const [foundItems, setFoundItems] = useState<FoundItem[]>([]);
+  const [myClaims, setMyClaims] = useState<ClaimSummary[]>([]);
   const [unreadNotifications, setUnreadNotifications] = useState(0);
   const [showNotifications, setShowNotifications] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -54,16 +57,18 @@ export function Dashboard({
     void (async () => {
       try {
         const token = await user!.getIdToken();
-        const [loadedProfile, lost, found, notifs] = await Promise.all([
+        const [loadedProfile, lost, found, notifs, claims] = await Promise.all([
           getMyProfile(token),
           getMyLostItems(token),
           getMyFoundItems(token),
           getNotifications(token).catch(() => ({ notifications: [], unread_count: 0, total: 0 })),
+          getMyClaims(token).catch(() => []),
         ]);
         if (!active) return;
         setProfile(loadedProfile);
         setLostItems(lost);
         setFoundItems(found);
+        setMyClaims(claims);
         setUnreadNotifications(notifs.unread_count);
       } catch (loadError) {
         if (active) {
@@ -269,6 +274,46 @@ export function Dashboard({
             </div>
           )}
         </article>
+
+        {myClaims.some((c) => c.is_finder || foundItems.some((f) => f.id === c.found_item_id)) && (
+          <article className="action-card" aria-labelledby="claims-card-title">
+            <h2 id="claims-card-title">📦 Claims on Items You Found</h2>
+            <p className="profile-note">
+              Students who identified an item you reported found have filed these claims.
+            </p>
+            <div className="reports-with-actions">
+              <ul className="report-summary-list">
+                {myClaims
+                  .filter((c) => c.is_finder || foundItems.some((f) => f.id === c.found_item_id))
+                  .map((claim) => (
+                    <li key={`claim-${claim.id}`} className="report-summary-item">
+                      <div className="found-info-row" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%" }}>
+                        <div>
+                          <strong>Item: {claim.found_item_name || claim.item_name || "Found Item"}</strong>
+                          <div style={{ fontSize: "0.85rem", color: "#64748b", marginTop: "2px" }}>
+                            Claimant: {claim.claimant_name || "Campus Student"}
+                          </div>
+                        </div>
+                        <span
+                          className={`status-tag status-${claim.status.toLowerCase()}`}
+                          style={{
+                            fontSize: "0.75rem",
+                            padding: "2px 8px",
+                            borderRadius: "999px",
+                            fontWeight: 600,
+                            background: claim.status === "CLAIM_REQUESTED" ? "#fef3c7" : "#e0f2fe",
+                            color: claim.status === "CLAIM_REQUESTED" ? "#92400e" : "#0369a1",
+                          }}
+                        >
+                          {claim.status === "CLAIM_REQUESTED" ? "UNDER REVIEW" : claim.status}
+                        </span>
+                      </div>
+                    </li>
+                  ))}
+              </ul>
+            </div>
+          </article>
+        )}
 
         {isAdmin && (
           <article className="action-card admin-card" aria-labelledby="admin-card-title">

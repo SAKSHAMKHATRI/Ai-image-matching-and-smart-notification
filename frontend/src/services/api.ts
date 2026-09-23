@@ -115,6 +115,9 @@ export type ScoredMatchItem = {
   description?: string | null;
   distinctive_features?: string | null;
   image_reference?: string | null;
+  finder_name?: string | null;
+  found_by?: string | null;
+  lost_item_name?: string | null;
   score: number;
   score_percent: number;
   classification: "STRONG_CANDIDATE" | "POSSIBLE_CANDIDATE" | "LOW_CONFIDENCE" | string;
@@ -512,15 +515,18 @@ export async function evaluateMatches(
 }
 
 export type ClaimSummary = {
-
   id: number;
   match_id: number;
   claimant_user_id: number;
+  claimant_name?: string | null;
   status: string;
   verification_notes?: string | null;
   found_item_id: number;
   lost_item_id: number;
   item_name: string;
+  found_item_name?: string | null;
+  lost_item_name?: string | null;
+  is_finder?: boolean | null;
   category?: string | null;
   score?: number | null;
   created_at: string;
@@ -531,6 +537,8 @@ export type ClaimDetail = {
   id: number;
   match_id: number;
   claimant_user_id: number;
+  claimant_name?: string | null;
+  finder_name?: string | null;
   status: string;
   verification_notes?: string | null;
   user_role: "claimant" | "lost_owner" | "found_finder" | "admin" | string;
@@ -556,6 +564,7 @@ export async function createClaim(
   idToken: string,
   matchId: number,
   verificationNotes?: string,
+  claimExplanation?: string,
 ): Promise<{ id: number; match_id: number; status: string }> {
   const response = await fetch(`${apiBaseUrl}/api/claims`, {
     method: "POST",
@@ -566,6 +575,7 @@ export async function createClaim(
     body: JSON.stringify({
       match_id: matchId,
       verification_notes: verificationNotes || null,
+      claim_explanation: claimExplanation || null,
     }),
   });
   if (!response.ok) {

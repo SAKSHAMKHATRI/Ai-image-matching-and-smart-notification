@@ -131,6 +131,27 @@ export function AdminDashboard({ onBack }: AdminDashboardProps) {
     }
   }
 
+  async function handleQuickClaimDecision(claimId: number, newStatus: string) {
+    if (!user) return;
+    setSubmittingAction(true);
+    setError(null);
+    try {
+      const token = await user.getIdToken();
+      await overrideAdminClaim(
+        token,
+        claimId,
+        newStatus,
+        `Decision set to ${newStatus} by administrator.`,
+      );
+      setSuccessMsg(`Claim #${claimId} status updated to ${newStatus}.`);
+      void loadData();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : `Failed to update claim to ${newStatus}.`);
+    } finally {
+      setSubmittingAction(false);
+    }
+  }
+
   async function handleExecuteClaimOverride() {
     if (!user || overrideClaimId === null) return;
     setSubmittingAction(true);
@@ -265,7 +286,10 @@ export function AdminDashboard({ onBack }: AdminDashboardProps) {
                   <th>Lost Item</th>
                   <th>Found Item</th>
                   <th>Claimant</th>
+                  <th>Finder</th>
                   <th>Score</th>
+                  <th>Submitted</th>
+                  <th>Authorized Verification Info</th>
                   <th>Actions</th>
                 </tr>
               </thead>
@@ -281,18 +305,58 @@ export function AdminDashboard({ onBack }: AdminDashboardProps) {
                     <td>{String(c.lost_item_name || `Lost #${String(c.lost_item_id)}`)}</td>
                     <td>{String(c.found_item_name || `Found #${String(c.found_item_id)}`)}</td>
                     <td>{String(c.claimant_name || c.claimant_email || `User #${String(c.claimant_user_id)}`)}</td>
+                    <td>{String(c.finder_name || "Campus Finder")}</td>
                     <td>{c.match_score ? `${(Number(c.match_score) * 100).toFixed(0)}%` : "N/A"}</td>
+                    <td>{c.created_at ? new Date(String(c.created_at)).toLocaleDateString() : "N/A"}</td>
+                    <td style={{ maxWidth: "200px", fontSize: "0.85rem", whiteSpace: "pre-wrap" }}>
+                      {String(c.verification_notes || "None provided")}
+                    </td>
                     <td>
-                      <button
-                        className="secondary-button btn-small"
-                        onClick={() => {
-                          setOverrideClaimId(Number(c.id));
-                          setOverrideStatus(String(c.status));
-                        }}
-                        type="button"
-                      >
-                        ⚙️ Override / Moderate
-                      </button>
+                      <div style={{ display: "flex", gap: "0.4rem", flexWrap: "wrap" }}>
+                        <button
+                          className="btn-small"
+                          disabled={submittingAction}
+                          onClick={() => void handleQuickClaimDecision(Number(c.id), "APPROVED")}
+                          style={{ background: "#10b981", color: "#fff", border: "none", padding: "4px 8px", borderRadius: "4px", cursor: "pointer", fontWeight: 600 }}
+                          title="Approve Claim"
+                          type="button"
+                          data-testid={`admin-approve-claim-${c.id}`}
+                        >
+                          Approve
+                        </button>
+                        <button
+                          className="btn-small"
+                          disabled={submittingAction}
+                          onClick={() => void handleQuickClaimDecision(Number(c.id), "REJECTED")}
+                          style={{ background: "#ef4444", color: "#fff", border: "none", padding: "4px 8px", borderRadius: "4px", cursor: "pointer", fontWeight: 600 }}
+                          title="Reject Claim"
+                          type="button"
+                          data-testid={`admin-reject-claim-${c.id}`}
+                        >
+                          Reject
+                        </button>
+                        <button
+                          className="btn-small"
+                          disabled={submittingAction}
+                          onClick={() => void handleQuickClaimDecision(Number(c.id), "ADMIN_REVIEW")}
+                          style={{ background: "#f59e0b", color: "#fff", border: "none", padding: "4px 8px", borderRadius: "4px", cursor: "pointer", fontWeight: 600 }}
+                          title="Escalate to Admin Review"
+                          type="button"
+                          data-testid={`admin-review-claim-${c.id}`}
+                        >
+                          Review
+                        </button>
+                        <button
+                          className="secondary-button btn-small"
+                          onClick={() => {
+                            setOverrideClaimId(Number(c.id));
+                            setOverrideStatus(String(c.status));
+                          }}
+                          type="button"
+                        >
+                          ⚙️ Notes
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}

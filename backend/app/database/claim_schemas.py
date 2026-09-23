@@ -30,6 +30,11 @@ class CreateClaimRequest(BaseModel):
     """Request body for creating a claim on a suggested match."""
 
     match_id: int
+    claim_explanation: str | None = Field(
+        default=None,
+        max_length=2000,
+        description="Explanation of why claimant believes this item is theirs.",
+    )
     verification_notes: str | None = Field(
         default=None,
         max_length=2000,
@@ -90,11 +95,15 @@ class ClaimSummaryResponse(BaseModel):
     id: int
     match_id: int
     claimant_user_id: int
+    claimant_name: str | None = None
     status: str
     verification_notes: str | None = None
     found_item_id: int
     lost_item_id: int
     item_name: str
+    found_item_name: str | None = None
+    lost_item_name: str | None = None
+    is_finder: bool | None = None
     category: str | None = None
     score: float | None = None
     created_at: str
@@ -107,6 +116,8 @@ class ClaimDetailResponse(BaseModel):
     id: int
     match_id: int
     claimant_user_id: int
+    claimant_name: str | None = None
+    finder_name: str | None = None
     status: str
     verification_notes: str | None = None
     user_role: str  # "claimant", "lost_owner", "found_finder", or "admin"

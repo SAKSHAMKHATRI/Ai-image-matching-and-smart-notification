@@ -45,6 +45,7 @@ def create_claim(
             claimant_user_id=user_id,
             match_id=request.match_id,
             verification_notes=request.verification_notes,
+            claim_explanation=request.claim_explanation,
         )
     except DuplicateClaimError as exc:
         raise HTTPException(
